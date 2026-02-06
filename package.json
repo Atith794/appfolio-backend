@@ -1,0 +1,29 @@
+{
+  "name": "@appfolio/api",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "start": "node dist/server.js",
+    "build": "tsc -p tsconfig.json",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "@clerk/backend": "^1.8.2",
+    "cloudinary": "^2.9.0",
+    "dotenv": "^16.4.5",
+    "fastify": "^4.28.1",
+    "fastify-plugin": "^4.5.1",
+    "mongodb": "^6.20.0",
+    "mongoose": "^8.21.0",
+    "razorpay": "^2.9.6",
+    "sharp": "^0.34.5",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "eslint": "^9.19.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3"
+  }
+}
