@@ -65,7 +65,27 @@ const AppSchema = new Schema(
     },
     architectureDiagramImageUrl: { 
       type: String, default: "" 
-    }
+    },
+    // userFlowDiagram: {
+    //   nodes: { type: Array, default: [] },
+    //   edges: { type: Array, default: [] },
+    //   viewport: { type: Object, default: null },
+    //   imageUrl: { type: String, default: "" },
+    // },
+    userFlowDiagram: {
+      version: { type: Number, default: 1 },
+      nodes: { type: Array, default: [] },
+      edges: { type: Array, default: [] },
+      viewport: {
+        x: Number,
+        y: Number,
+        zoom: Number
+      }
+    },
+    userFlowText: {
+      mode: { type: String, enum: ["TEXT", "DIAGRAM", "BOTH"], default: "BOTH" },
+      bullets: { type: [String], default: [] }
+    },
   },
   { timestamps: true }
 );

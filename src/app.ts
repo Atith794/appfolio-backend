@@ -16,7 +16,7 @@ export async function buildApp() {
 
   //CORS to allow every origin
   await app.register(cors, {
-    origin: 'http://localhost:3000', // Your Next.js frontend
+    origin: 'http://localhost:3000',
     methods: ['GET', 'POST', 'PUT','PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
     credentials: true, // Required for Clerk session cookies if used

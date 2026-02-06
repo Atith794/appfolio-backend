@@ -81,6 +81,24 @@ const architectureDiagramImageSchema = z.object({
   imageUrl: z.string().url(),
 });
 
+const userFlowDiagramSchema = z.object({
+  version: z.number().optional(),
+  nodes: z.array(z.any()).default([]),
+  edges: z.array(z.any()).default([]),
+  viewport: z
+    .object({
+      x: z.number(),
+      y: z.number(),
+      zoom: z.number(),
+    })
+    .optional(),
+});
+
+const userFlowTextSchema = z.object({
+  mode: z.enum(["TEXT", "DIAGRAM", "BOTH"]).default("BOTH"),
+  bullets: z.array(z.string().min(1)).max(20).default([]),
+});
+
 export default async function appsRoutes(app: any) {
   // List my apps
   app.get("/", { preHandler: app.requireAuth }, async (req: any) => {
@@ -626,6 +644,121 @@ export default async function appsRoutes(app: any) {
       await appDoc.save();
 
       return { success: true, imageUrl: appDoc.architectureDiagramImageUrl };
+    }
+  );
+
+  // User flow diagram
+  // app.patch(
+  //   "/:appId/user-flow-diagram",
+  //   { preHandler: app.requireAuth },
+  //   async (req: any, reply: any) => {
+  //     const clerkUserId = req.auth.clerkUserId;
+  //     const user = await UserModel.findOne({ clerkUserId });
+  //     if (!user) return reply.code(401).send({ message: "Unauthorized" });
+
+  //     const appDoc = await AppModel.findOne({
+  //       _id: new Types.ObjectId(req.params.appId),
+  //       userId: user._id,
+  //     });
+  //     if (!appDoc) return reply.code(404).send({ message: "App not found" });
+
+  //     // zod schema (keep in same routes file like you do)
+  //     const parsed = userFlowDiagramSchema.safeParse(req.body);
+  //     if (!parsed.success) return reply.code(400).send(parsed.error.flatten());
+
+  //     appDoc.userFlowDiagram = {
+  //       nodes: parsed.data.nodes ?? [],
+  //       edges: parsed.data.edges ?? [],
+  //       viewport: parsed.data.viewport ?? null,
+  //       imageUrl: appDoc.userFlowDiagram?.imageUrl ?? "",
+  //     };
+
+  //     await appDoc.save();
+  //     return { ok: true };
+  //   }
+  // );
+  app.patch(
+    "/:appId/user-flow-diagram",
+    { preHandler: app.requireAuth },
+    async (req: any, reply: any) => {
+      const parsed = userFlowDiagramSchema.safeParse(req.body);
+      if (!parsed.success) return reply.code(400).send(parsed.error.flatten());
+
+      const clerkUserId = req.auth.clerkUserId;
+      const user = await UserModel.findOne({ clerkUserId });
+      if (!user) return reply.code(401).send({ message: "Unauthorized" });
+
+      const appDoc = await AppModel.findOne({
+        _id: new Types.ObjectId(req.params.appId),
+        userId: user._id,
+      });
+      if (!appDoc) return reply.code(404).send({ message: "App not found" });
+
+      appDoc.userFlowDiagram = {
+        version: parsed.data.version ?? 1,
+        nodes: parsed.data.nodes ?? [],
+        edges: parsed.data.edges ?? [],
+        viewport: parsed.data.viewport,
+      };
+
+      await appDoc.save();
+      return { ok: true };
+    }
+  );
+
+  // Save Userflow diagram url
+  app.patch(
+    "/:appId/user-flow-diagram/image",
+    { preHandler: app.requireAuth },
+    async (req: any, reply: any) => {
+      const parsed = z.object({ imageUrl: z.string().url() }).safeParse(req.body);
+      if (!parsed.success) return reply.code(400).send(parsed.error.flatten());
+
+      const clerkUserId = req.auth.clerkUserId;
+      const user = await UserModel.findOne({ clerkUserId });
+      if (!user) return reply.code(401).send({ message: "Unauthorized" });
+
+      const appDoc = await AppModel.findOne({
+        _id: new Types.ObjectId(req.params.appId),
+        userId: user._id,
+      });
+      if (!appDoc) return reply.code(404).send({ message: "App not found" });
+
+      appDoc.userFlowDiagram = {
+        ...(appDoc.userFlowDiagram as any),
+        imageUrl: parsed.data.imageUrl,
+      };
+
+      await appDoc.save();
+      return { ok: true };
+    }
+  );
+
+  // Save Userflow text
+  app.patch(
+    "/:appId/user-flow-text",
+    { preHandler: app.requireAuth },
+    async (req: any, reply: any) => {
+      const parsed = userFlowTextSchema.safeParse(req.body);
+      if (!parsed.success) return reply.code(400).send(parsed.error.flatten());
+
+      const clerkUserId = req.auth.clerkUserId;
+      const user = await UserModel.findOne({ clerkUserId });
+      if (!user) return reply.code(401).send({ message: "Unauthorized" });
+
+      const appDoc = await AppModel.findOne({
+        _id: new Types.ObjectId(req.params.appId),
+        userId: user._id,
+      });
+      if (!appDoc) return reply.code(404).send({ message: "App not found" });
+
+      appDoc.userFlowText = {
+        mode: parsed.data.mode,
+        bullets: parsed.data.bullets,
+      };
+
+      await appDoc.save();
+      return { ok: true, userFlowText: appDoc.userFlowText };
     }
   );
 }

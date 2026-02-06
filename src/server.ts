@@ -12,5 +12,3 @@ try {
   app.log.error(err);
   process.exit(1);
 }
-
-// MONGODB_URI=mongodb+srv://atith:12345@cluster0.6hengam.mongodb.net/appfolio?retryWrites=true&w=majority
