@@ -99,6 +99,26 @@ const userFlowTextSchema = z.object({
   bullets: z.array(z.string().min(1)).max(20).default([]),
 });
 
+const techStackSchema = z.object({
+  frontend: z.array(z.string()).default([]),
+  backend: z.array(z.string()).default([]),
+  database: z.array(z.string()).default([]),
+  infra: z.array(z.string()).default([]),
+});
+
+const integrationsSchema = z.object({
+  intro: z.string().max(300).optional().default(""),
+  items: z
+    .array(
+      z.object({
+        key: z.string().min(1).max(40),
+        value: z.string().min(1).max(80),
+      })
+    )
+    .max(12)
+    .default([]),
+});
+
 export default async function appsRoutes(app: any) {
   // List my apps
   app.get("/", { preHandler: app.requireAuth }, async (req: any) => {
@@ -647,36 +667,6 @@ export default async function appsRoutes(app: any) {
     }
   );
 
-  // User flow diagram
-  // app.patch(
-  //   "/:appId/user-flow-diagram",
-  //   { preHandler: app.requireAuth },
-  //   async (req: any, reply: any) => {
-  //     const clerkUserId = req.auth.clerkUserId;
-  //     const user = await UserModel.findOne({ clerkUserId });
-  //     if (!user) return reply.code(401).send({ message: "Unauthorized" });
-
-  //     const appDoc = await AppModel.findOne({
-  //       _id: new Types.ObjectId(req.params.appId),
-  //       userId: user._id,
-  //     });
-  //     if (!appDoc) return reply.code(404).send({ message: "App not found" });
-
-  //     // zod schema (keep in same routes file like you do)
-  //     const parsed = userFlowDiagramSchema.safeParse(req.body);
-  //     if (!parsed.success) return reply.code(400).send(parsed.error.flatten());
-
-  //     appDoc.userFlowDiagram = {
-  //       nodes: parsed.data.nodes ?? [],
-  //       edges: parsed.data.edges ?? [],
-  //       viewport: parsed.data.viewport ?? null,
-  //       imageUrl: appDoc.userFlowDiagram?.imageUrl ?? "",
-  //     };
-
-  //     await appDoc.save();
-  //     return { ok: true };
-  //   }
-  // );
   app.patch(
     "/:appId/user-flow-diagram",
     { preHandler: app.requireAuth },
@@ -759,6 +749,75 @@ export default async function appsRoutes(app: any) {
 
       await appDoc.save();
       return { ok: true, userFlowText: appDoc.userFlowText };
+    }
+  );
+
+  //Teck's
+  app.patch(
+    "/:appId/tech-stack",
+    { preHandler: app.requireAuth },
+    async (req: any, reply: any) => {
+      const parsed = techStackSchema.safeParse(req.body);
+      if (!parsed.success) return reply.code(400).send(parsed.error.flatten());
+
+      const clerkUserId = req.auth.clerkUserId;
+      const user = await UserModel.findOne({ clerkUserId });
+      if (!user) return reply.code(401).send({ message: "Unauthorized" });
+
+      const appDoc = await AppModel.findOne({
+        _id: new Types.ObjectId(req.params.appId),
+        userId: user._id,
+      });
+      if (!appDoc) return reply.code(404).send({ message: "App not found" });
+
+      appDoc.techStack = {
+        frontend: parsed.data.frontend,
+        backend: parsed.data.backend,
+        database: parsed.data.database,
+        infra: parsed.data.infra,
+      };
+
+      await appDoc.save();
+      return { ok: true, techStack: appDoc.techStack };
+    }
+  );
+
+  //Integrations
+  app.patch(
+    "/:appId/integrations",
+    { preHandler: app.requireAuth },
+    async (req: any, reply: any) => {
+      const parsed = integrationsSchema.safeParse(req.body);
+      if (!parsed.success) return reply.code(400).send(parsed.error.flatten());
+
+      const clerkUserId = req.auth.clerkUserId;
+      const user = await UserModel.findOne({ clerkUserId });
+      if (!user) return reply.code(401).send({ message: "Unauthorized" });
+
+      const appDoc = await AppModel.findOne({
+        _id: new Types.ObjectId(req.params.appId),
+        userId: user._id,
+      });
+
+      if (!appDoc) return reply.code(404).send({ message: "App not found" });
+
+      // Normalize: trim, drop empty, de-dupe by key (keep last)
+      const intro = (parsed.data.intro || "").trim();
+
+      const map = new Map<string, string>();
+      for (const it of parsed.data.items) {
+        const k = it.key.trim();
+        const v = it.value.trim();
+        if (!k || !v) continue;
+        map.set(k, v);
+      }
+
+      const items = Array.from(map.entries()).map(([key, value]) => ({ key, value }));
+
+      appDoc.integrations = { intro, items };
+      await appDoc.save();
+
+      return { ok: true, integrations: appDoc.integrations };
     }
   );
 }

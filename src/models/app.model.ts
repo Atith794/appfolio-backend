@@ -33,6 +33,14 @@ const LinksSchema = new Schema(
   { _id: false }
 );
 
+const IntegrationKVSchema = new Schema(
+  {
+    key: { type: String, required: true },
+    value: { type: String, required: true },
+  },
+  { _id: false }
+);
+
 const AppSchema = new Schema(
   {
     userId: { type: Types.ObjectId, required: true, index: true },
@@ -66,12 +74,6 @@ const AppSchema = new Schema(
     architectureDiagramImageUrl: { 
       type: String, default: "" 
     },
-    // userFlowDiagram: {
-    //   nodes: { type: Array, default: [] },
-    //   edges: { type: Array, default: [] },
-    //   viewport: { type: Object, default: null },
-    //   imageUrl: { type: String, default: "" },
-    // },
     userFlowDiagram: {
       version: { type: Number, default: 1 },
       nodes: { type: Array, default: [] },
@@ -85,6 +87,16 @@ const AppSchema = new Schema(
     userFlowText: {
       mode: { type: String, enum: ["TEXT", "DIAGRAM", "BOTH"], default: "BOTH" },
       bullets: { type: [String], default: [] }
+    },
+    techStack: {
+      frontend: { type: [String], default: [] },
+      backend: { type: [String], default: [] },
+      database: { type: [String], default: [] },
+      infra: { type: [String], default: [] },
+    },
+    integrations: {
+      intro: { type: String, default: "" }, // optional short line
+      items: { type: [IntegrationKVSchema], default: [] },
     },
   },
   { timestamps: true }
