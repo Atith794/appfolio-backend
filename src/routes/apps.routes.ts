@@ -8,6 +8,32 @@ import { generateCover } from "../utils/generateCover.js";
 import { v2 as cloudinary } from "cloudinary";
 import { getScreenshotLimit } from "../utils/limits.js";
 
+function requirePro(user: any, reply: any) {
+  if (user.plan !== "PRO") {
+    reply.code(403).send({
+      code: "PRO_REQUIRED",
+      message: "Upgrade to Pro to group screenshots and add descriptions."
+    });
+    return false;
+  }
+  return true;
+}
+
+const screenshotGroupCreateSchema = z.object({
+  key: z.string().min(2).max(32).regex(/^[a-z0-9-]+$/), // simple slug
+  title: z.string().min(2).max(60),
+  description: z.string().max(140).optional().default(""),
+});
+
+const screenshotGroupUpdateSchema = z.object({
+  title: z.string().min(2).max(60).optional(),
+  description: z.string().max(140).optional(),
+});
+
+const screenshotAssignGroupSchema = z.object({
+  groupKey: z.string().max(32).optional().default(""), // "" => ungroup
+});
+
 const createAppSchema = z.object({
   name: z.string().min(2),
   // slug: z.string().min(2), // for now user provides; later you auto-slugify
@@ -41,7 +67,8 @@ const reorderStepsSchema = z.object({
 const updateScreenshotSchema = z.object({
   url: z.string().url().optional(),
   width: z.number().optional(),
-  height: z.number().optional()
+  height: z.number().optional(),
+  groupKey: z.string().max(32).optional(),
 });
 
 const appHeroSchema = z.object({
@@ -117,6 +144,73 @@ const integrationsSchema = z.object({
     )
     .max(12)
     .default([]),
+});
+
+// const iconRefSchema = z.object({
+//   id: z.string().min(1),
+//   name: z.string().optional().default(""),
+//   category: z.string().optional().default(""),
+// });
+
+const iconRefSchema = z.preprocess((val) => {
+  if (!val || typeof val !== "object") return undefined;
+  const v = val as any;
+  if (!v.id || !String(v.id).trim()) return undefined;
+  return val;
+}, z.object({
+  id: z.string().min(1),
+  name: z.string().optional().default(""),
+  category: z.string().optional().default(""),
+}).optional());
+
+const stepSchema = z.object({
+  kind: z.enum(["NODE", "ARROW"]),
+  order: z.number().int().min(0),
+  color: z.string().min(1),
+
+  // NODE fields
+  label: z.string().optional(),
+  desc: z.string().optional(),
+  icon: z.string().optional(),
+  iconType: z.enum(["EMOJI", "IMAGE", "TECH"]).optional(),
+  // iconRef: iconRefSchema.optional(),
+  iconRef: iconRefSchema,
+
+  // ARROW fields
+  text: z.string().optional(),
+}).superRefine((v, ctx) => {
+  if (v.kind === "NODE" && !v.label) ctx.addIssue({ code: "custom", message: "NODE requires label" });
+  if (v.kind === "ARROW" && !v.text) ctx.addIssue({ code: "custom", message: "ARROW requires text" });
+});
+
+const flowSchema = z.object({
+  id: z.string().min(1),
+  title: z.string().min(1),
+  icon: z.string().optional(),
+  order: z.number().int().min(0),
+  steps: z.array(stepSchema).default([]),
+});
+
+function slugify(s: string) {
+  return String(s || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)/g, "");
+}
+
+function uniqueKey(base: string, existing: Set<string>) {
+  if (!existing.has(base)) return base;
+  for (let i = 2; i <= 50; i++) {
+    const k = `${base}-${i}`;
+    if (!existing.has(k)) return k;
+  }
+  return `${base}-${Date.now()}`;
+}
+
+export const userFlowWalkthroughsSchema = z.object({
+  intro: z.string().optional(),
+  flows: z.array(flowSchema).max(12).default([]),
 });
 
 export default async function appsRoutes(app: any) {
@@ -456,6 +550,7 @@ export default async function appsRoutes(app: any) {
     "/:appId/screenshots/:screenshotId",
     { preHandler: app.requireAuth },
     async (req: any, reply: any) => {
+      console.log("req.body:",req.body);
       const parsed = updateScreenshotSchema.safeParse(req.body);
       if (!parsed.success) return reply.code(400).send(parsed.error.flatten());
 
@@ -469,8 +564,29 @@ export default async function appsRoutes(app: any) {
       });
 
       if (!appDoc) return reply.code(404).send({ message: "App not found" });
+      console.log("params:",req.params)
 
       const shot = appDoc.screenshots.id(req.params.screenshotId);
+      //Check if the user is a pro-user
+      if (parsed.data.groupKey !== undefined) {
+        if (!requirePro(user, reply)) return;
+        if (user.plan !== "PRO") {
+          return reply.code(403).send({
+            code: "PRO_REQUIRED",
+            message: "Upgrade to Pro to group screenshots.",
+          });
+        }
+
+        // validate group exists when assigning (unless ungroup "")
+        const key = parsed.data.groupKey.trim();
+        console.log("parsed.data:",parsed.data);
+        if (key !== "") {
+          const exists = appDoc.screenshotGroups.some((g: any) => g.key === key);
+          if (!exists) return reply.code(400).send({ message: "Invalid groupKey" });
+        }
+        console.log("Key:",key)
+        shot.groupKey = key;
+      }
       if (!shot) return reply.code(404).send({ message: "Screenshot not found" });
 
       if (parsed.data.url !== undefined) shot.url = parsed.data.url;
@@ -497,7 +613,6 @@ export default async function appsRoutes(app: any) {
       });
 
       if (!appDoc) return reply.code(404).send({ message: "App not found" });
-
       const shot = appDoc.screenshots.id(req.params.screenshotId);
       if (!shot) return reply.code(404).send({ message: "Screenshot not found" });
 
@@ -820,4 +935,105 @@ export default async function appsRoutes(app: any) {
       return { ok: true, integrations: appDoc.integrations };
     }
   );
+
+  //Userflow Walkthrough
+  app.patch(
+    "/:appId/user-flow-walkthroughs",
+    { preHandler: app.requireAuth },
+    async (req: any, reply: any) => {
+      const parsed = userFlowWalkthroughsSchema.safeParse(req.body);
+      console.log("Req body:",JSON.stringify(parsed));
+      if (!parsed.success) return reply.code(400).send(parsed.error.flatten());
+
+      const clerkUserId = req.auth.clerkUserId;
+      const user = await UserModel.findOne({ clerkUserId });
+      if (!user) return reply.code(401).send({ message: "Unauthorized" });
+
+      const appDoc = await AppModel.findOne({
+        _id: new Types.ObjectId(req.params.appId),
+        userId: user._id,
+      });
+      if (!appDoc) return reply.code(404).send({ message: "App not found" });
+
+      (appDoc as any).userFlowWalkthroughs = parsed.data;
+
+      await appDoc.save();
+      return { ok: true, userFlowWalkthroughs: (appDoc as any).userFlowWalkthroughs };
+    }
+  );
+
+  app.post(
+    "/:appId/screenshot-groups",
+    { preHandler: app.requireAuth },
+    async (req: any, reply: any) => {
+      const parsed = screenshotGroupCreateSchema.safeParse(req.body);
+      if (!parsed.success) return reply.code(400).send(parsed.error.flatten());
+
+      const user = await UserModel.findOne({ clerkUserId: req.auth.clerkUserId });
+      if (!user) return reply.code(401).send({ message: "Unauthorized" });
+      if (!requirePro(user, reply)) return;
+
+      const appDoc = await AppModel.findOne({ _id: req.params.appId, userId: user._id });
+      if (!appDoc) return reply.code(404).send({ message: "App not found" });
+
+      const exists = appDoc.screenshotGroups.some((g: any) => g.key === parsed.data.key);
+      if (exists) return reply.code(409).send({ message: "Group key already exists" });
+
+      appDoc.screenshotGroups.push(parsed.data);
+      await appDoc.save();
+
+      return { screenshotGroups: appDoc.screenshotGroups };
+    }
+  );
+
+  app.patch(
+    "/:appId/screenshot-groups/:groupKey",
+    { preHandler: app.requireAuth },
+    async (req: any, reply: any) => {
+      const parsed = screenshotGroupUpdateSchema.safeParse(req.body);
+      if (!parsed.success) return reply.code(400).send(parsed.error.flatten());
+
+      const user = await UserModel.findOne({ clerkUserId: req.auth.clerkUserId });
+      if (!user) return reply.code(401).send({ message: "Unauthorized" });
+      if (!requirePro(user, reply)) return;
+
+      const appDoc = await AppModel.findOne({ _id: req.params.appId, userId: user._id });
+      if (!appDoc) return reply.code(404).send({ message: "App not found" });
+
+      const g = appDoc.screenshotGroups.find((x: any) => x.key === req.params.groupKey);
+      if (!g) return reply.code(404).send({ message: "Group not found" });
+
+      if (parsed.data.title !== undefined) g.title = parsed.data.title;
+      if (parsed.data.description !== undefined) g.description = parsed.data.description;
+
+      await appDoc.save();
+      return { screenshotGroups: appDoc.screenshotGroups };
+    }
+  );
+
+  app.delete(
+    "/:appId/screenshot-groups/:groupKey",
+    { preHandler: app.requireAuth },
+    async (req: any, reply: any) => {
+      const user = await UserModel.findOne({ clerkUserId: req.auth.clerkUserId });
+      if (!user) return reply.code(401).send({ message: "Unauthorized" });
+      if (!requirePro(user, reply)) return;
+
+      const appDoc = await AppModel.findOne({ _id: req.params.appId, userId: user._id });
+      if (!appDoc) return reply.code(404).send({ message: "App not found" });
+
+      const key = req.params.groupKey;
+
+      appDoc.screenshotGroups = appDoc.screenshotGroups.filter((g: any) => g.key !== key);
+
+      // unassign screenshots
+      appDoc.screenshots.forEach((s: any) => {
+        if (s.groupKey === key) s.groupKey = "";
+      });
+
+      await appDoc.save();
+      return { screenshotGroups: appDoc.screenshotGroups, screenshots: appDoc.screenshots };
+    }
+  );
+
 }
