@@ -1,49 +1,10 @@
-// import { UserModel } from "../models/user.model.ts";
-// import { AppModel } from "../models/app.model.ts";
-
-// export default async function publicRoutes(app: any) {
-//   // GET /public/u/:username
-//   app.get("/u/:username", async (req: any, reply: any) => {
-//     const { username } = req.params;
-
-//     const user = await UserModel.findOne({ username }).lean();
-//     if (!user) return reply.code(404).send({ message: "User not found" });
-
-//     const apps = await AppModel.find({
-//       userId: user._id,
-//       visibility: { $in: ["PUBLIC", "UNLISTED"] }
-//     })
-//       .sort({ createdAt: -1 })
-//       .lean();
-
-//     return { user, apps };
-//   });
-
-//   // GET /public/u/:username/:slug
-//   app.get("/u/:username/:slug", async (req: any, reply: any) => {
-//     const { username, slug } = req.params;
-//     console.log("Params received:", req.params);
-//     const user = await UserModel.findOne({ username }).lean();
-//     if (!user) return reply.code(404).send({ message: "User not found" });
-
-//     const appDoc = await AppModel.findOne({
-//       userId: user._id,
-//       slug,
-//       visibility: { $in: ["PUBLIC", "UNLISTED"] }
-//     }).lean();
-
-//     if (!appDoc) return reply.code(404).send({ message: "App not found" });
-
-//     return { user, app: appDoc };
-//   });
-// }
-
-
-import { UserModel } from "../models/user.model.ts";
-import { AppModel } from "../models/app.model.ts";
+import { UserModel } from "../models/user.model";
+import { AppModel } from "../models/app.model";
+import { effectivePlan } from "../lib/entitlements";
 
 function sanitizePublicApp(appDoc: any, plan: string) {
-  // Always safe / always public fields (keep what you want visible for FREE)
+  const isPro = plan === "PRO";
+
   const safeApp: any = {
     _id: appDoc._id,
     userId: appDoc.userId,
@@ -59,7 +20,7 @@ function sanitizePublicApp(appDoc: any, plan: string) {
 
     // Free-visible sections
     screenshots: appDoc.screenshots || [],
-    screenshotGroups: appDoc.screenshotGroups || [], // (optional; public grouping maybe PRO later)
+    screenshotGroups: appDoc.screenshotGroups || [],
     techStack: appDoc.techStack || {},
     overviewBullets: appDoc.overviewBullets || [],
     challengesIntro: appDoc.challengesIntro || "",
@@ -71,25 +32,61 @@ function sanitizePublicApp(appDoc: any, plan: string) {
     updatedAt: appDoc.updatedAt,
   };
 
-  // If you want screenshot grouping on public only for PRO, do this:
-  if (plan !== "PRO") {
+  // FREE: hide public grouping (optional)
+  if (!isPro) {
     safeApp.screenshotGroups = [];
     safeApp.screenshots = (safeApp.screenshots || []).map((s: any) => ({ ...s, groupKey: "" }));
   }
 
-  // Premium-only: include ONLY for PRO
-  if (plan === "PRO") {
+  // PRO: include premium sections
+  if (isPro) {
     safeApp.architectureDiagramImageUrl = appDoc.architectureDiagramImageUrl || "";
     safeApp.integrations = appDoc.integrations || { intro: "", items: [] };
     safeApp.userFlowWalkthroughs = appDoc.userFlowWalkthroughs || null;
 
-    // if you also consider these premium in public:
     safeApp.userFlowDiagram = appDoc.userFlowDiagram || null;
     safeApp.userFlowText = appDoc.userFlowText || null;
     safeApp.architectureDiagram = appDoc.architectureDiagram || null;
+  } else {
+    // FREE: send "preview stubs" (no sensitive content)
+
+    // 1) Architecture preview — only indicate locked + optionally provide a blurred thumbnail URL if you have one
+    safeApp.architectureDiagramPreview = {
+      locked: true,
+      // If you can generate/store a blurred thumbnail in future, put it here:
+      // imageUrl: appDoc.architectureDiagramImageUrl ? makeBlurUrl(appDoc.architectureDiagramImageUrl) : null
+      imageUrl: null,
+      hint: "Unlock Pro to view architecture diagram",
+    };
+
+    // 2) Integrations preview — keep intro length tiny + mask items
+    const items = (appDoc.integrations?.items || []) as any[];
+    safeApp.integrationsPreview = {
+      locked: true,
+      intro: appDoc.integrations?.intro ? String(appDoc.integrations.intro).slice(0, 90) + "…" : "",
+      items: items.slice(0, 2).map((it) => ({
+        key: it?.key ? String(it.key) : "Integration",
+        value: "Locked (Pro)",
+      })),
+      hint: "Unlock Pro to view integrations & key decisions",
+    };
+
+    // 3) Userflow preview — only show flow names/titles (no steps)
+    const flows = appDoc.userFlowWalkthroughs?.flows || [];
+    safeApp.userFlowWalkthroughsPreview = {
+      locked: true,
+      flows: Array.isArray(flows)
+        ? flows.slice(0, 2).map((f: any) => ({
+            id: f?.id || null,
+            title: f?.title ? String(f.title) : "User flow",
+            // no steps here
+          }))
+        : [],
+      hint: "Unlock Pro to view user flows",
+    };
   }
 
-  // Optional: flags (lets you show “locked preview” CTA without sending the content)
+  // Flags for the frontend to decide whether to show locked cards
   safeApp.lockedFlags = {
     hasArchitecture: !!appDoc.architectureDiagramImageUrl,
     hasIntegrations: !!(appDoc.integrations?.intro || (appDoc.integrations?.items || []).length),
@@ -147,15 +144,17 @@ export default async function publicRoutes(app: any) {
     const user = await UserModel.findOne({ username }).lean();
     if (!user) return reply.code(404).send({ message: "User not found" });
 
+    const plan = effectivePlan(user); // "FREE" | "PRO"
+
     const appDoc = await AppModel.findOne({
       userId: user._id,
       slug,
-      visibility: { $in: ["PUBLIC", "UNLISTED"] }
+      visibility: { $in: ["PUBLIC", "UNLISTED"] },
     }).lean();
 
     if (!appDoc) return reply.code(404).send({ message: "App not found" });
 
-    const safeApp = sanitizePublicApp(appDoc, user.plan);
+    const safeApp = sanitizePublicApp(appDoc, plan);
 
     return {
       user: {
@@ -165,7 +164,7 @@ export default async function publicRoutes(app: any) {
         bio: user.bio,
       },
       app: safeApp,
-      meta: { plan: user.plan }, // ✅ critical for public page gating
+      meta: { effectivePlan: plan },
     };
   });
 }

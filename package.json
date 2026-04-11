@@ -18,6 +18,7 @@
     "mongoose": "^8.21.0",
     "razorpay": "^2.9.6",
     "sharp": "^0.34.5",
+    "stripe": "^20.4.0",
     "zod": "^3.23.8"
   },
   "devDependencies": {
