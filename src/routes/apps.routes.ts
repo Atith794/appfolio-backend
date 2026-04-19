@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { UserModel } from "../models/user.model";
 import { AppModel } from "../models/app.model";
-import { slugify } from "../utils/slug.js";
+// import { slugify } from "../utils/slug.js";
 import { Types } from "mongoose";
 import axios from "axios";
 import { generateCover } from "../utils/generateCover.js";
