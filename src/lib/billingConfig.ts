@@ -4,22 +4,24 @@ export type BillingProvider = "razorpay" | "stripe";
 export type BillingRegion = "IN" | "UK" | "EU" | "ROW";
 
 export type RazorpayBillingConfig = {
-  region: "IN";
-  currency: "INR";
+  region: "IN" | "UK" | "EU" | "ROW";
+  currency: "INR" | "GBP" | "EUR" | "USD";
   provider: "razorpay";
   prices: Record<Billing, number>;
   razorpayPlanIds: Record<Billing, string>;
 };
 
-export type StripeBillingConfig = {
-  region: "UK" | "EU" | "ROW";
-  currency: "GBP" | "EUR" | "USD";
-  provider: "stripe";
-  prices: Record<Billing, number>;
-  stripePriceIds: Record<Billing, string>;
-};
+// export type StripeBillingConfig = {
+//   region: "UK" | "EU" | "ROW";
+//   currency: "GBP" | "EUR" | "USD";
+//   provider: "stripe";
+//   prices: Record<Billing, number>;
+//   stripePriceIds: Record<Billing, string>;
+// };
 
-export type BillingConfig = RazorpayBillingConfig | StripeBillingConfig;
+// export type BillingConfig = RazorpayBillingConfig | StripeBillingConfig;
+
+export type BillingConfig = RazorpayBillingConfig ;
 
 export const REGION_COUNTRY_MAP: Record<string, BillingRegion> = {
   IN: "IN",
@@ -52,43 +54,82 @@ export const BILLING_CATALOG: Record<BillingRegion, BillingConfig> = {
       YEARLY: process.env.RAZORPAY_PLAN_ID_YEARLY!,
     },
   },
-  UK: {
+  // UK: {
+  //   region: "UK",
+  //   currency: "GBP",
+  //   provider: "stripe",
+  //   prices: {
+  //     MONTHLY: 12,
+  //     YEARLY: 48,
+  //   },
+  //   stripePriceIds: {
+  //     MONTHLY: process.env.STRIPE_PRICE_GBP_MONTHLY!,
+  //     YEARLY: process.env.STRIPE_PRICE_GBP_YEARLY!,
+  //   },
+  // },
+  // EU: {
+  //   region: "EU",
+  //   currency: "EUR",
+  //   provider: "stripe",
+  //   prices: {
+  //     MONTHLY: 14,
+  //     YEARLY: 56,
+  //   },
+  //   stripePriceIds: {
+  //     MONTHLY: process.env.STRIPE_PRICE_EUR_MONTHLY!,
+  //     YEARLY: process.env.STRIPE_PRICE_EUR_YEARLY!,
+  //   },
+  // },
+  // ROW: {
+  //   region: "ROW",
+  //   currency: "USD",
+  //   provider: "stripe",
+  //   prices: {
+  //     MONTHLY: 15,
+  //     YEARLY: 60,
+  //   },
+  //   stripePriceIds: {
+  //     MONTHLY: process.env.STRIPE_PRICE_USD_MONTHLY!,
+  //     YEARLY: process.env.STRIPE_PRICE_USD_YEARLY!,
+  //   },
+  // },
+   UK: {
     region: "UK",
     currency: "GBP",
-    provider: "stripe",
+    provider: "razorpay",
     prices: {
       MONTHLY: 12,
       YEARLY: 48,
     },
-    stripePriceIds: {
-      MONTHLY: process.env.STRIPE_PRICE_GBP_MONTHLY!,
-      YEARLY: process.env.STRIPE_PRICE_GBP_YEARLY!,
+    razorpayPlanIds: {
+      MONTHLY: process.env.RAZORPAY_PLAN_ID_MONTHLY!,
+      YEARLY: process.env.RAZORPAY_PLAN_ID_YEARLY!,
     },
   },
   EU: {
     region: "EU",
     currency: "EUR",
-    provider: "stripe",
+    provider: "razorpay",
     prices: {
       MONTHLY: 14,
       YEARLY: 56,
     },
-    stripePriceIds: {
-      MONTHLY: process.env.STRIPE_PRICE_EUR_MONTHLY!,
-      YEARLY: process.env.STRIPE_PRICE_EUR_YEARLY!,
+    razorpayPlanIds: {
+      MONTHLY: process.env.RAZORPAY_PLAN_ID_MONTHLY!,
+      YEARLY: process.env.RAZORPAY_PLAN_ID_YEARLY!,
     },
   },
   ROW: {
     region: "ROW",
     currency: "USD",
-    provider: "stripe",
+    provider: "razorpay",
     prices: {
       MONTHLY: 15,
       YEARLY: 60,
     },
-    stripePriceIds: {
-      MONTHLY: process.env.STRIPE_PRICE_USD_MONTHLY!,
-      YEARLY: process.env.STRIPE_PRICE_USD_YEARLY!,
+    razorpayPlanIds: {
+      MONTHLY: process.env.RAZORPAY_PLAN_ID_MONTHLY!,
+      YEARLY: process.env.RAZORPAY_PLAN_ID_YEARLY!,
     },
   },
 };

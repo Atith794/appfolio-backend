@@ -55,6 +55,10 @@ const UserSchema = new Schema(
     cancelAtPeriodEnd: { type: Boolean, default: false },
     lastPaymentAt: { type: Date, default: null },
     lastWebhookEventId: { type: String, default: null },
+    currentPeriodStart: { type: Date, default: null},
+    subscriptionEndedAt: { type: Date, default: null},
+    lastPaymentFailedAt: { type:Date, default: null },
+    lastPaymentFailureReason: { type: String, default: null }
   },
   { timestamps: true },
 );

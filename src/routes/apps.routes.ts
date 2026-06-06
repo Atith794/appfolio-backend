@@ -8,11 +8,15 @@ import { generateCover } from "../utils/generateCover.js";
 import { v2 as cloudinary } from "cloudinary";
 import { getScreenshotLimit } from "../utils/limits.js";
 
+function isValidObjectId(id: string) {
+  return Types.ObjectId.isValid(id);
+}
+
 function requirePro(user: any, reply: any) {
   if (user.plan !== "PRO") {
     reply.code(403).send({
       code: "PRO_REQUIRED",
-      message: "Upgrade to Pro to group screenshots and add descriptions."
+      message: "Upgrade to Pro to group screenshots and add descriptions.",
     });
     return false;
   }
@@ -20,69 +24,93 @@ function requirePro(user: any, reply: any) {
 }
 
 const screenshotGroupCreateSchema = z.object({
-  key: z.string().min(2).max(32).regex(/^[a-z0-9-]+$/), // simple slug
+  key: z
+    .string()
+    .min(2)
+    .max(32)
+    .regex(/^[a-z0-9-]+$/), // simple slug
   title: z.string().min(2).max(60),
   description: z.string().max(140).optional().default(""),
-});
+}).strict();
 
 const screenshotGroupUpdateSchema = z.object({
   title: z.string().min(2).max(60).optional(),
   description: z.string().max(140).optional(),
-});
+}).strict();
 
 const screenshotAssignGroupSchema = z.object({
   groupKey: z.string().max(32).optional().default(""), // "" => ungroup
-});
+}).strict();
 
 const createAppSchema = z.object({
   name: z.string().min(2),
   // slug: z.string().min(2), // for now user provides; later you auto-slugify
   shortDescription: z.string().optional(),
-  platform: z.array(z.enum(["ANDROID", "IOS"])).optional()
-});
+  platform: z.array(z.enum(["ANDROID", "IOS"])).optional(),
+}).strict();
+
+function isAllowedCloudinaryUrl(url: string) {
+  try {
+    const parsed = new URL(url);
+
+    return (
+      parsed.protocol === "https:" &&
+      parsed.hostname === "res.cloudinary.com" &&
+      parsed.pathname.includes("/image/upload/")
+    );
+  } catch {
+    return false;
+  }
+}
 
 const screenshotSchema = z.object({
   url: z.string().url(),
-  width: z.number(),
-  height: z.number()
-});
+  publicId: z.string().min(1).max(300),
+  fileHash: z.string().regex(/^[a-f0-9]{64}$/),
+  width: z.number().int().positive().max(5000),
+  height: z.number().int().positive().max(5000),
+}).strict();
 
 const reorderSchema = z.object({
-  screenshotIds: z.array(z.string().min(1)).min(1)
-});
+  screenshotIds: z.array(z.string().min(1)).min(1),
+}).strict();
 
 const stepCreateSchema = z.object({
   title: z.string().min(2).max(80),
   description: z.string().max(500).optional(),
   imageUrl: z.string().url().optional(),
-  tags: z.array(z.string().min(1).max(20)).optional()
-});
+  tags: z.array(z.string().min(1).max(20)).optional(),
+}).strict();
 
 const stepUpdateSchema = stepCreateSchema.partial();
 
 const reorderStepsSchema = z.object({
-  stepIds: z.array(z.string().min(1)).min(1)
-});
+  stepIds: z.array(z.string().min(1)).min(1),
+}).strict();
 
 const updateScreenshotSchema = z.object({
   url: z.string().url().optional(),
   width: z.number().optional(),
   height: z.number().optional(),
   groupKey: z.string().max(32).optional(),
-});
+}).strict();
 
 const appHeroSchema = z.object({
   name: z.string().trim().min(2).max(80).optional(),
-  platform: z.array(z.enum(["ANDROID", "IOS", "WINDOWS"])).min(1).max(3).optional(),
+  platform: z
+    .array(z.enum(["ANDROID", "IOS", "WINDOWS"]))
+    .min(1)
+    .max(3)
+    .optional(),
   appIconUrl: z.string().url().optional().or(z.literal("")),
-});
+}).strict();
 
 const appOverviewSchema = z.object({
   bullets: z
     .array(z.string().trim().min(2).max(120))
     .min(3, "Add at least 3 bullet points")
     .max(5, "Maximum 5 bullet points"),
-});
+}).strict();
 
 const challengesSchema = z.object({
   intro: z.string().trim().max(600).optional().or(z.literal("")),
@@ -90,7 +118,7 @@ const challengesSchema = z.object({
     .array(z.string().trim().min(2).max(160))
     .min(2, "Add at least 2 bullet points")
     .max(8, "Maximum 8 bullet points"),
-});
+}).strict();
 
 const architectureDiagramSchema = z.object({
   nodes: z.array(z.any()),
@@ -102,11 +130,11 @@ const architectureDiagramSchema = z.object({
       zoom: z.number(),
     })
     .optional(),
-});
+}).strict();
 
 const architectureDiagramImageSchema = z.object({
   imageUrl: z.string().url(),
-});
+}).strict();
 
 const userFlowDiagramSchema = z.object({
   version: z.number().optional(),
@@ -119,19 +147,19 @@ const userFlowDiagramSchema = z.object({
       zoom: z.number(),
     })
     .optional(),
-});
+}).strict();
 
 const userFlowTextSchema = z.object({
   mode: z.enum(["TEXT", "DIAGRAM", "BOTH"]).default("BOTH"),
   bullets: z.array(z.string().min(1)).max(20).default([]),
-});
+}).strict();
 
 const techStackSchema = z.object({
   frontend: z.array(z.string()).default([]),
   backend: z.array(z.string()).default([]),
   database: z.array(z.string()).default([]),
   infra: z.array(z.string()).default([]),
-});
+}).strict();
 
 const integrationsSchema = z.object({
   intro: z.string().max(300).optional().default(""),
@@ -140,11 +168,11 @@ const integrationsSchema = z.object({
       z.object({
         key: z.string().min(1).max(40),
         value: z.string().min(1).max(80),
-      })
+      }),
     )
     .max(12)
     .default([]),
-});
+}).strict();
 
 // const iconRefSchema = z.object({
 //   id: z.string().min(1),
@@ -152,36 +180,45 @@ const integrationsSchema = z.object({
 //   category: z.string().optional().default(""),
 // });
 
-const iconRefSchema = z.preprocess((val) => {
-  if (!val || typeof val !== "object") return undefined;
-  const v = val as any;
-  if (!v.id || !String(v.id).trim()) return undefined;
-  return val;
-}, z.object({
-  id: z.string().min(1),
-  name: z.string().optional().default(""),
-  category: z.string().optional().default(""),
-}).optional());
+const iconRefSchema = z.preprocess(
+  (val) => {
+    if (!val || typeof val !== "object") return undefined;
+    const v = val as any;
+    if (!v.id || !String(v.id).trim()) return undefined;
+    return val;
+  },
+  z
+    .object({
+      id: z.string().min(1),
+      name: z.string().optional().default(""),
+      category: z.string().optional().default(""),
+    })
+    .optional(),
+);
 
-const stepSchema = z.object({
-  kind: z.enum(["NODE", "ARROW"]),
-  order: z.number().int().min(0),
-  color: z.string().min(1),
+const stepSchema = z
+  .object({
+    kind: z.enum(["NODE", "ARROW"]),
+    order: z.number().int().min(0),
+    color: z.string().min(1),
 
-  // NODE fields
-  label: z.string().optional(),
-  desc: z.string().optional(),
-  icon: z.string().optional(),
-  iconType: z.enum(["EMOJI", "IMAGE", "TECH"]).optional(),
-  // iconRef: iconRefSchema.optional(),
-  iconRef: iconRefSchema,
+    // NODE fields
+    label: z.string().optional(),
+    desc: z.string().optional(),
+    icon: z.string().optional(),
+    iconType: z.enum(["EMOJI", "IMAGE", "TECH"]).optional(),
+    // iconRef: iconRefSchema.optional(),
+    iconRef: iconRefSchema,
 
-  // ARROW fields
-  text: z.string().optional(),
-}).superRefine((v, ctx) => {
-  if (v.kind === "NODE" && !v.label) ctx.addIssue({ code: "custom", message: "NODE requires label" });
-  if (v.kind === "ARROW" && !v.text) ctx.addIssue({ code: "custom", message: "ARROW requires text" });
-});
+    // ARROW fields
+    text: z.string().optional(),
+  })
+  .superRefine((v, ctx) => {
+    if (v.kind === "NODE" && !v.label)
+      ctx.addIssue({ code: "custom", message: "NODE requires label" });
+    if (v.kind === "ARROW" && !v.text)
+      ctx.addIssue({ code: "custom", message: "ARROW requires text" });
+  });
 
 const flowSchema = z.object({
   id: z.string().min(1),
@@ -189,7 +226,7 @@ const flowSchema = z.object({
   icon: z.string().optional(),
   order: z.number().int().min(0),
   steps: z.array(stepSchema).default([]),
-});
+}).strict();
 
 function slugify(s: string) {
   return String(s || "")
@@ -211,83 +248,131 @@ function uniqueKey(base: string, existing: Set<string>) {
 export const userFlowWalkthroughsSchema = z.object({
   intro: z.string().optional(),
   flows: z.array(flowSchema).max(12).default([]),
-});
+}).strict();
 
 export default async function appsRoutes(app: any) {
   // List my apps
-  app.get("/", { preHandler: app.requireAuth }, async (req: any) => {
+  app.get("/", {
+    preHandler: app.requireAuth,
+    bodyLimit: 100 * 1024,
+    config: {
+      rateLimit: {
+        max: 60,
+        timeWindow: "1 minute",
+      },
+    },
+  }, async (req: any) => {
     const clerkUserId = req.auth.clerkUserId;
 
     const user = await UserModel.findOne({ clerkUserId }).lean();
     if (!user) return { apps: [] };
 
-    const apps = await AppModel.find({ userId: user._id })
+    const apps = await AppModel.find({ userId: user?._id })
       .sort({ createdAt: -1 })
       .lean();
 
     return { user, apps };
+    // return {
+    //   user:{
+    //     id: user._id,
+    //     username: user.username,
+    //     displayName: user.displayName,
+    //     plan: user.plan,
+    //     planStatus: user.planStatus
+    //   },
+    //   apps
+    // }
   });
 
   // Create app (auto-creates user if missing)
-  app.post("/", { preHandler: app.requireAuth }, async (req: any, reply: any) => {
-    const clerkUserId = req.auth.clerkUserId;
-    const parsed = createAppSchema.safeParse(req.body);
-    if (!parsed.success) return reply.code(400).send(parsed.error.flatten());
+  app.post(
+    "/",
+    {
+    preHandler: app.requireAuth,
+    bodyLimit: 100 * 1024,
+    config: {
+      rateLimit: {
+        max: 10,
+        timeWindow: "1 minute",
+      },
+    },
+  },
+    async (req: any, reply: any) => {
+      const clerkUserId = req.auth.clerkUserId;
+      const parsed = createAppSchema.safeParse(req.body);
+      if (!parsed.success) return reply.code(400).send(parsed.error.flatten());
 
-    const { name, shortDescription, platform } = parsed.data;
+      const { name, shortDescription, platform } = parsed.data;
 
-    const baseSlug = slugify(name);
-    let slug = baseSlug || "app";
-    let user = await UserModel.findOne({ clerkUserId });
-    if (!user) {
-      // Minimal user bootstrap (you’ll set username during onboarding)
-      return reply.code(400).send({
-        message: "User profile not created. Set username first."
+      const baseSlug = slugify(name);
+      let slug = baseSlug || "app";
+      let user = await UserModel.findOne({ clerkUserId });
+      if (!user) {
+        // Minimal user bootstrap (you’ll set username during onboarding)
+        return reply.code(400).send({
+          message: "User profile not created. Set username first.",
+        });
+      }
+
+      // ensure unique per user: try slug, slug-2, slug-3...
+      for (let i = 0; i < 20; i++) {
+        const exists = await AppModel.exists({ userId: user._id, slug });
+        if (!exists) break;
+        slug = `${baseSlug}-${i + 2}`;
+      }
+
+      const created = await AppModel.create({
+        userId: user._id,
+        name,
+        slug,
+        shortDescription: shortDescription || "",
+        platform: platform || ["ANDROID"],
       });
-    }
 
-    // ensure unique per user: try slug, slug-2, slug-3...
-    for (let i = 0; i < 20; i++) {
-      const exists = await AppModel.exists({ userId: user._id, slug });
-      if (!exists) break;
-      slug = `${baseSlug}-${i + 2}`;
-    }
-
-    const created = await AppModel.create({
-      userId: user._id,
-      name,
-      slug,
-      shortDescription: shortDescription || "",
-      platform: platform || ["ANDROID"]
-    });
-
-    return reply.code(201).send({ app: created });
-  });
+      return reply.code(201).send({ app: created });
+    },
+  );
 
   //Screenshot upload route
   app.post(
     "/:appId/screenshots",
-    { preHandler: app.requireAuth },
+    {
+    preHandler: app.requireAuth,
+    bodyLimit: 500 * 1024,
+    config: {
+      rateLimit: {
+        max: 20,
+        timeWindow: "1 minute",
+      },
+    },
+  },
     async (req: any, reply: any) => {
+      
       const parsed = screenshotSchema.safeParse(req.body);
       if (!parsed.success) return reply.code(400).send(parsed.error.flatten());
-
+      if (!isAllowedCloudinaryUrl(parsed.data.url)) {
+        return reply.code(400).send({
+          message: "Only Cloudinary image URLs are allowed",
+        });
+      }
       const clerkUserId = req.auth.clerkUserId;
       const user = await UserModel.findOne({ clerkUserId });
       if (!user) return reply.code(401).send({ message: "Unauthorized" });
       const limit = getScreenshotLimit(user.plan);
       const appDoc = await AppModel.findOne({
         _id: new Types.ObjectId(req.params.appId),
-        userId: user._id
+        userId: user._id,
       });
 
       if (!appDoc) return reply.code(404).send({ message: "App not found" });
       // ✅ LIMIT ENFORCEMENT
       if (appDoc.screenshots.length >= limit) {
-        console.log("Limit reached",limit,user.plan)
         return reply.code(403).send({
           code: "SCREENSHOT_LIMIT_REACHED",
-          message: user.plan === 'FREE'?`Screenshot limit reached (${limit}). Upgrade to Pro to add more.`:`Screenshot limit reached. More screenshots would be overwhelming for the person who visits your profile`
+          message:
+            user.plan === "FREE"
+              ? `Screenshot limit reached (${limit}). Upgrade to Pro to add more.`
+              : `Screenshot limit reached. More screenshots would be overwhelming for the person who visits your profile`,
         });
       }
 
@@ -295,30 +380,41 @@ export default async function appsRoutes(app: any) {
 
       appDoc.screenshots.push({
         url: parsed.data.url,
+        publicId: parsed.data.publicId,
+        fileHash: parsed.data.fileHash,
         width: parsed.data.width,
         height: parsed.data.height,
-        order
+        order,
       });
 
       await appDoc.save();
 
       return { screenshots: appDoc.screenshots };
-    }
+    },
   );
 
   //Get the screenshots list
   app.get(
     "/:appId",
-    { preHandler: app.requireAuth },
+    {
+    preHandler: app.requireAuth,
+    bodyLimit: 100 * 1024,
+    config: {
+      rateLimit: {
+        max: 60,
+        timeWindow: "1 minute",
+      },
+    },
+  },
     async (req: any, reply: any) => {
       const clerkUserId = req.auth.clerkUserId;
-      
+
       const user = await UserModel.findOne({ clerkUserId }).lean();
       if (!user) return reply.code(401).send({ message: "Unauthorized" });
 
       const appDoc = await AppModel.findOne({
         _id: new Types.ObjectId(req.params.appId),
-        userId: user._id
+        userId: user._id,
       }).lean();
 
       const screenshotLimit = getScreenshotLimit(user.plan);
@@ -326,21 +422,30 @@ export default async function appsRoutes(app: any) {
 
       if (!appDoc) return reply.code(404).send({ message: "App not found" });
 
-      return { 
+      return {
         app: appDoc,
         meta: {
           plan: user.plan,
           screenshotLimit,
-          screenshotsUsed
-        } 
+          screenshotsUsed,
+        },
       };
-    }
+    },
   );
 
   //Reorder the screenshots
   app.patch(
     "/:appId/screenshots/reorder",
-    { preHandler: app.requireAuth },
+    {
+    preHandler: app.requireAuth,
+    bodyLimit: 100 * 1024,
+    config: {
+      rateLimit: {
+        max: 35,
+        timeWindow: "1 minute",
+      },
+    },
+  },
     async (req: any, reply: any) => {
       const parsed = reorderSchema.safeParse(req.body);
       if (!parsed.success) return reply.code(400).send(parsed.error.flatten());
@@ -351,19 +456,25 @@ export default async function appsRoutes(app: any) {
 
       const appDoc = await AppModel.findOne({
         _id: new Types.ObjectId(req.params.appId),
-        userId: user._id
+        userId: user._id,
       });
 
       if (!appDoc) return reply.code(404).send({ message: "App not found" });
 
-      const currentIds = new Set(appDoc.screenshots.map((s: any) => String(s._id)));
+      const currentIds = new Set(
+        appDoc.screenshots.map((s: any) => String(s._id)),
+      );
       for (const id of parsed.data.screenshotIds) {
         if (!currentIds.has(id)) {
-          return reply.code(400).send({ message: "Invalid screenshot id in reorder list" });
+          return reply
+            .code(400)
+            .send({ message: "Invalid screenshot id in reorder list" });
         }
       }
 
-      const orderMap = new Map(parsed.data.screenshotIds.map((id, idx) => [id, idx + 1]));
+      const orderMap = new Map(
+        parsed.data.screenshotIds.map((id, idx) => [id, idx + 1]),
+      );
       appDoc.screenshots.forEach((s: any) => {
         const newOrder = orderMap.get(String(s._id));
         if (newOrder) s.order = newOrder;
@@ -375,11 +486,17 @@ export default async function appsRoutes(app: any) {
       await appDoc.save();
 
       return { screenshots: appDoc.screenshots };
-    }
+    },
   );
 
   // helper to load user + app
   async function getOwnedApp(req: any, reply: any) {
+    const { appId } = req.params;
+
+    if (!isValidObjectId(appId)) {
+      reply.code(400).send({ message: "Invalid app ID" });
+      return null;
+    }
     const clerkUserId = req.auth.clerkUserId;
     const user = await UserModel.findOne({ clerkUserId });
     if (!user) {
@@ -387,9 +504,13 @@ export default async function appsRoutes(app: any) {
       return null;
     }
 
+    // const appDoc = await AppModel.findOne({
+    //   _id: new Types.ObjectId(req.params.appId),
+    //   userId: user._id,
+    // });
     const appDoc = await AppModel.findOne({
-      _id: new Types.ObjectId(req.params.appId),
-      userId: user._id
+      _id: appId,
+      userId: user._id,
     });
 
     if (!appDoc) {
@@ -397,19 +518,30 @@ export default async function appsRoutes(app: any) {
       return null;
     }
 
-    return appDoc;
+    return { user, appDoc };
   }
 
   // POST add step
   app.post(
     "/:appId/walkthrough",
-    { preHandler: app.requireAuth },
+    {
+    preHandler: app.requireAuth,
+    bodyLimit: 100 * 1024,
+    config: {
+      rateLimit: {
+        max: 20,
+        timeWindow: "1 minute",
+      },
+    },
+  },
     async (req: any, reply: any) => {
       const parsed = stepCreateSchema.safeParse(req.body);
       if (!parsed.success) return reply.code(400).send(parsed.error.flatten());
 
-      const appDoc = await getOwnedApp(req, reply);
-      if (!appDoc) return;
+      const owned = await getOwnedApp(req, reply);
+      if (!owned) return;
+
+      const { user, appDoc } = owned
 
       const order = appDoc.walkthrough.length + 1;
 
@@ -418,47 +550,71 @@ export default async function appsRoutes(app: any) {
         title: parsed.data.title,
         description: parsed.data.description || "",
         imageUrl: parsed.data.imageUrl,
-        tags: parsed.data.tags || []
+        tags: parsed.data.tags || [],
       });
 
       appDoc.walkthrough.sort((a: any, b: any) => a.order - b.order);
       await appDoc.save();
 
       return { walkthrough: appDoc.walkthrough };
-    }
+    },
   );
 
   // PATCH update step
   app.patch(
     "/:appId/walkthrough/:stepId",
-    { preHandler: app.requireAuth },
+    {
+    preHandler: app.requireAuth,
+    bodyLimit: 100 * 1024,
+    config: {
+      rateLimit: {
+        max: 35,
+        timeWindow: "1 minute",
+      },
+    },
+  },
     async (req: any, reply: any) => {
       const parsed = stepUpdateSchema.safeParse(req.body);
       if (!parsed.success) return reply.code(400).send(parsed.error.flatten());
 
-      const appDoc = await getOwnedApp(req, reply);
-      if (!appDoc) return;
+      const owned = await getOwnedApp(req, reply);
+      if (!owned) return;
+
+      const { user, appDoc } = owned;
 
       const step = appDoc.walkthrough.id(req.params.stepId);
       if (!step) return reply.code(404).send({ message: "Step not found" });
 
       if (parsed.data.title !== undefined) step.title = parsed.data.title;
-      if (parsed.data.description !== undefined) step.description = parsed.data.description;
-      if (parsed.data.imageUrl !== undefined) step.imageUrl = parsed.data.imageUrl;
+      if (parsed.data.description !== undefined)
+        step.description = parsed.data.description;
+      if (parsed.data.imageUrl !== undefined)
+        step.imageUrl = parsed.data.imageUrl;
       if (parsed.data.tags !== undefined) step.tags = parsed.data.tags;
 
       await appDoc.save();
       return { walkthrough: appDoc.walkthrough };
-    }
+    },
   );
 
   // DELETE step
   app.delete(
     "/:appId/walkthrough/:stepId",
-    { preHandler: app.requireAuth },
+    {
+    preHandler: app.requireAuth,
+    bodyLimit: 100 * 1024,
+    config: {
+      rateLimit: {
+        max: 20,
+        timeWindow: "1 minute",
+      },
+    },
+  },
     async (req: any, reply: any) => {
-      const appDoc = await getOwnedApp(req, reply);
-      if (!appDoc) return;
+      const owned = await getOwnedApp(req, reply);
+
+      if (!owned) return;
+      const { user, appDoc } = owned
 
       const step = appDoc.walkthrough.id(req.params.stepId);
       if (!step) return reply.code(404).send({ message: "Step not found" });
@@ -472,28 +628,46 @@ export default async function appsRoutes(app: any) {
 
       await appDoc.save();
       return { walkthrough: appDoc.walkthrough };
-    }
+    },
   );
 
   // PATCH reorder steps
   app.patch(
     "/:appId/walkthrough/reorder",
-    { preHandler: app.requireAuth },
+    {
+    preHandler: app.requireAuth,
+    bodyLimit: 100 * 1024,
+    config: {
+      rateLimit: {
+        max: 20,
+        timeWindow: "1 minute",
+      },
+    },
+  },
     async (req: any, reply: any) => {
       const parsed = reorderStepsSchema.safeParse(req.body);
       if (!parsed.success) return reply.code(400).send(parsed.error.flatten());
 
-      const appDoc = await getOwnedApp(req, reply);
-      if (!appDoc) return;
+      const  owned = await getOwnedApp(req, reply);
 
-      const currentIds = new Set(appDoc.walkthrough.map((s: any) => String(s._id)));
+      if (!owned) return;
+
+      const { user, appDoc } = owned
+
+      const currentIds = new Set(
+        appDoc.walkthrough.map((s: any) => String(s._id)),
+      );
       for (const id of parsed.data.stepIds) {
         if (!currentIds.has(id)) {
-          return reply.code(400).send({ message: "Invalid step id in reorder list" });
+          return reply
+            .code(400)
+            .send({ message: "Invalid step id in reorder list" });
         }
       }
 
-      const orderMap = new Map(parsed.data.stepIds.map((id, idx) => [id, idx + 1]));
+      const orderMap = new Map(
+        parsed.data.stepIds.map((id, idx) => [id, idx + 1]),
+      );
       appDoc.walkthrough.forEach((s: any) => {
         const newOrder = orderMap.get(String(s._id));
         if (newOrder) s.order = newOrder;
@@ -503,16 +677,28 @@ export default async function appsRoutes(app: any) {
       await appDoc.save();
 
       return { walkthrough: appDoc.walkthrough };
-    }
+    },
   );
 
   //Generate cover image
   app.post(
     "/:appId/generate-cover",
-    { preHandler: app.requireAuth },
+    {
+    preHandler: app.requireAuth,
+    bodyLimit: 500 * 1024,
+    config: {
+      rateLimit: {
+        max: 20,
+        timeWindow: "1 minute",
+      },
+    },
+  },
     async (req: any, reply: any) => {
-      const appDoc = await getOwnedApp(req, reply);
-      if (!appDoc) return;
+      const owned = await getOwnedApp(req, reply);
+
+      if (!owned) return;
+
+      const { appDoc } = owned
 
       const user = await UserModel.findById(appDoc.userId);
       if (!user) return reply.code(404).send({ message: "User not found" });
@@ -520,7 +706,9 @@ export default async function appsRoutes(app: any) {
       let screenshotBuffer: Buffer | undefined;
 
       if (appDoc.screenshots.length) {
-        const first = appDoc.screenshots.sort((a: any, b: any) => a.order - b.order)[0];
+        const first = appDoc.screenshots.sort(
+          (a: any, b: any) => a.order - b.order,
+        )[0];
         const img = await axios.get(first.url, { responseType: "arraybuffer" });
         screenshotBuffer = Buffer.from(img.data);
       }
@@ -528,7 +716,7 @@ export default async function appsRoutes(app: any) {
       const buffer = await generateCover({
         title: appDoc.name,
         subtitle: `by ${user.username}`,
-        screenshotBuffer
+        screenshotBuffer,
       });
 
       const upload = await cloudinary.uploader.upload_stream(
@@ -538,19 +726,28 @@ export default async function appsRoutes(app: any) {
           appDoc.coverImageUrl = result.secure_url;
           await appDoc.save();
           reply.send({ coverImageUrl: result.secure_url });
-        }
+        },
       );
 
       upload.end(buffer);
-    }
+    },
   );
 
   //Screenshot crop
   app.patch(
     "/:appId/screenshots/:screenshotId",
-    { preHandler: app.requireAuth },
+    {
+    preHandler: app.requireAuth,
+    bodyLimit: 500 * 1024,
+    config: {
+      rateLimit: {
+        max: 30,
+        timeWindow: "1 minute",
+      },
+    },
+  },
     async (req: any, reply: any) => {
-      console.log("req.body:",req.body);
+      
       const parsed = updateScreenshotSchema.safeParse(req.body);
       if (!parsed.success) return reply.code(400).send(parsed.error.flatten());
 
@@ -560,34 +757,37 @@ export default async function appsRoutes(app: any) {
 
       const appDoc = await AppModel.findOne({
         _id: new Types.ObjectId(req.params.appId),
-        userId: user._id
+        userId: user._id,
       });
 
       if (!appDoc) return reply.code(404).send({ message: "App not found" });
-      console.log("params:",req.params)
+      
 
       const shot = appDoc.screenshots.id(req.params.screenshotId);
+      if (!shot) return reply.code(404).send({ message: "Screenshot not found" });
       //Check if the user is a pro-user
       if (parsed.data.groupKey !== undefined) {
         if (!requirePro(user, reply)) return;
-        if (user.plan !== "PRO") {
-          return reply.code(403).send({
-            code: "PRO_REQUIRED",
-            message: "Upgrade to Pro to group screenshots.",
-          });
-        }
+        // if (user.plan !== "PRO") {
+        //   return reply.code(403).send({
+        //     code: "PRO_REQUIRED",
+        //     message: "Upgrade to Pro to group screenshots.",
+        //   });
+        // }
 
         // validate group exists when assigning (unless ungroup "")
         const key = parsed.data.groupKey.trim();
-        console.log("parsed.data:",parsed.data);
+        
         if (key !== "") {
-          const exists = appDoc.screenshotGroups.some((g: any) => g.key === key);
-          if (!exists) return reply.code(400).send({ message: "Invalid groupKey" });
+          const exists = appDoc.screenshotGroups.some(
+            (g: any) => g.key === key,
+          );
+          if (!exists)
+            return reply.code(400).send({ message: "Invalid groupKey" });
         }
-        console.log("Key:",key)
         shot.groupKey = key;
       }
-      if (!shot) return reply.code(404).send({ message: "Screenshot not found" });
+      
 
       if (parsed.data.url !== undefined) shot.url = parsed.data.url;
       if (parsed.data.width !== undefined) shot.width = parsed.data.width;
@@ -595,13 +795,22 @@ export default async function appsRoutes(app: any) {
 
       await appDoc.save();
       return { screenshots: appDoc.screenshots };
-    }
+    },
   );
 
   //Delete screenshots
   app.delete(
     "/:appId/screenshots/:screenshotId",
-    { preHandler: app.requireAuth },
+    {
+    preHandler: app.requireAuth,
+    bodyLimit: 500 * 1024,
+    config: {
+      rateLimit: {
+        max: 20,
+        timeWindow: "1 minute",
+      },
+    },
+  },
     async (req: any, reply: any) => {
       const clerkUserId = req.auth.clerkUserId;
       const user = await UserModel.findOne({ clerkUserId });
@@ -609,13 +818,15 @@ export default async function appsRoutes(app: any) {
 
       const appDoc = await AppModel.findOne({
         _id: new Types.ObjectId(req.params.appId),
-        userId: user._id
+        userId: user._id,
       });
 
       if (!appDoc) return reply.code(404).send({ message: "App not found" });
       const shot = appDoc.screenshots.id(req.params.screenshotId);
-      if (!shot) return reply.code(404).send({ message: "Screenshot not found" });
+      if (!shot)
+        return reply.code(404).send({ message: "Screenshot not found" });
 
+      const publicId = shot.publicId;
       // remove
       shot.deleteOne();
 
@@ -625,14 +836,30 @@ export default async function appsRoutes(app: any) {
         .forEach((s: any, idx: number) => (s.order = idx + 1));
 
       await appDoc.save();
-      return { screenshots: appDoc.screenshots };
+      if (publicId) {
+        try {
+          await cloudinary.uploader.destroy(publicId);
+        } catch (err) {
+          req.log.error({ err, publicId }, "Failed to delete Cloudinary screenshot");
+        }
+        return { screenshots: appDoc.screenshots };
+      }
     }
   );
 
   //Add app hero section
   app.patch(
     "/:appId/hero",
-    { preHandler: app.requireAuth },
+    {
+    preHandler: app.requireAuth,
+    bodyLimit: 100 * 1024,
+    config: {
+      rateLimit: {
+        max: 20,
+        timeWindow: "1 minute",
+      },
+    },
+  },
     async (req: any, reply: any) => {
       const parsed = appHeroSchema.safeParse(req.body);
       if (!parsed.success) return reply.code(400).send(parsed.error.flatten());
@@ -657,13 +884,22 @@ export default async function appsRoutes(app: any) {
       await appDoc.save();
 
       return { app: appDoc };
-    }
+    },
   );
 
   //Add app overview section
   app.patch(
     "/:appId/overview",
-    { preHandler: app.requireAuth },
+    {
+    preHandler: app.requireAuth,
+    bodyLimit: 100 * 1024,
+    config: {
+      rateLimit: {
+        max: 20,
+        timeWindow: "1 minute",
+      },
+    },
+  },
     async (req: any, reply: any) => {
       const parsed = appOverviewSchema.safeParse(req.body);
       if (!parsed.success) return reply.code(400).send(parsed.error.flatten());
@@ -680,21 +916,28 @@ export default async function appsRoutes(app: any) {
       if (!appDoc) return reply.code(404).send({ message: "App not found" });
 
       // sanitize: remove empty + trim (extra safe)
-      const cleaned = parsed.data.bullets
-        .map((b) => b.trim())
-        .filter(Boolean);
+      const cleaned = parsed.data.bullets.map((b) => b.trim()).filter(Boolean);
 
       appDoc.overviewBullets = cleaned;
 
       await appDoc.save();
       return { app: appDoc };
-    }
+    },
   );
 
   //Add challenges and tradeoffs
   app.patch(
     "/:appId/challenges",
-    { preHandler: app.requireAuth },
+    {
+    preHandler: app.requireAuth,
+    bodyLimit: 100 * 1024,
+    config: {
+      rateLimit: {
+        max: 20,
+        timeWindow: "1 minute",
+      },
+    },
+  },
     async (req: any, reply: any) => {
       const parsed = challengesSchema.safeParse(req.body);
       if (!parsed.success) return reply.code(400).send(parsed.error.flatten());
@@ -722,13 +965,22 @@ export default async function appsRoutes(app: any) {
 
       await appDoc.save();
       return { app: appDoc };
-    }
+    },
   );
 
   // Architecture diagram
   app.patch(
     "/:appId/architecture-diagram",
-    { preHandler: app.requireAuth },
+    {
+    preHandler: app.requireAuth,
+    bodyLimit: 500 * 1024,
+    config: {
+      rateLimit: {
+        max: 20,
+        timeWindow: "1 minute",
+      },
+    },
+  },
     async (req: any, reply: any) => {
       const parsed = architectureDiagramSchema.safeParse(req.body);
       if (!parsed.success) return reply.code(400).send(parsed.error.flatten());
@@ -753,13 +1005,22 @@ export default async function appsRoutes(app: any) {
 
       await appDoc.save();
       return { success: true };
-    }
+    },
   );
 
   // Export architecture diagram
   app.patch(
     "/:appId/architecture-diagram/image",
-    { preHandler: app.requireAuth },
+    {
+    preHandler: app.requireAuth,
+    bodyLimit: 500 * 1024,
+    config: {
+      rateLimit: {
+        max: 20,
+        timeWindow: "1 minute",
+      },
+    },
+  },
     async (req: any, reply: any) => {
       const parsed = architectureDiagramImageSchema.safeParse(req.body);
       if (!parsed.success) return reply.code(400).send(parsed.error.flatten());
@@ -779,12 +1040,21 @@ export default async function appsRoutes(app: any) {
       await appDoc.save();
 
       return { success: true, imageUrl: appDoc.architectureDiagramImageUrl };
-    }
+    },
   );
 
   app.patch(
     "/:appId/user-flow-diagram",
-    { preHandler: app.requireAuth },
+    {
+    preHandler: app.requireAuth,
+    bodyLimit: 500 * 1024,
+    config: {
+      rateLimit: {
+        max: 20,
+        timeWindow: "1 minute",
+      },
+    },
+  },
     async (req: any, reply: any) => {
       const parsed = userFlowDiagramSchema.safeParse(req.body);
       if (!parsed.success) return reply.code(400).send(parsed.error.flatten());
@@ -808,15 +1078,26 @@ export default async function appsRoutes(app: any) {
 
       await appDoc.save();
       return { ok: true };
-    }
+    },
   );
 
   // Save Userflow diagram url
   app.patch(
     "/:appId/user-flow-diagram/image",
-    { preHandler: app.requireAuth },
+    {
+    preHandler: app.requireAuth,
+    bodyLimit: 100 * 1024,
+    config: {
+      rateLimit: {
+        max: 20,
+        timeWindow: "1 minute",
+      },
+    },
+  },
     async (req: any, reply: any) => {
-      const parsed = z.object({ imageUrl: z.string().url() }).safeParse(req.body);
+      const parsed = z
+        .object({ imageUrl: z.string().url() })
+        .safeParse(req.body);
       if (!parsed.success) return reply.code(400).send(parsed.error.flatten());
 
       const clerkUserId = req.auth.clerkUserId;
@@ -836,13 +1117,22 @@ export default async function appsRoutes(app: any) {
 
       await appDoc.save();
       return { ok: true };
-    }
+    },
   );
 
   // Save Userflow text
   app.patch(
     "/:appId/user-flow-text",
-    { preHandler: app.requireAuth },
+    {
+    preHandler: app.requireAuth,
+    bodyLimit: 100 * 1024,
+    config: {
+      rateLimit: {
+        max: 20,
+        timeWindow: "1 minute",
+      },
+    },
+  },
     async (req: any, reply: any) => {
       const parsed = userFlowTextSchema.safeParse(req.body);
       if (!parsed.success) return reply.code(400).send(parsed.error.flatten());
@@ -864,13 +1154,22 @@ export default async function appsRoutes(app: any) {
 
       await appDoc.save();
       return { ok: true, userFlowText: appDoc.userFlowText };
-    }
+    },
   );
 
   //Teck's
   app.patch(
     "/:appId/tech-stack",
-    { preHandler: app.requireAuth },
+    {
+    preHandler: app.requireAuth,
+    bodyLimit: 500 * 1024,
+    config: {
+      rateLimit: {
+        max: 20,
+        timeWindow: "1 minute",
+      },
+    },
+  },
     async (req: any, reply: any) => {
       const parsed = techStackSchema.safeParse(req.body);
       if (!parsed.success) return reply.code(400).send(parsed.error.flatten());
@@ -894,13 +1193,22 @@ export default async function appsRoutes(app: any) {
 
       await appDoc.save();
       return { ok: true, techStack: appDoc.techStack };
-    }
+    },
   );
 
   //Integrations
   app.patch(
     "/:appId/integrations",
-    { preHandler: app.requireAuth },
+    {
+    preHandler: app.requireAuth,
+    bodyLimit: 100 * 1024,
+    config: {
+      rateLimit: {
+        max: 20,
+        timeWindow: "1 minute",
+      },
+    },
+  },
     async (req: any, reply: any) => {
       const parsed = integrationsSchema.safeParse(req.body);
       if (!parsed.success) return reply.code(400).send(parsed.error.flatten());
@@ -927,22 +1235,33 @@ export default async function appsRoutes(app: any) {
         map.set(k, v);
       }
 
-      const items = Array.from(map.entries()).map(([key, value]) => ({ key, value }));
+      const items = Array.from(map.entries()).map(([key, value]) => ({
+        key,
+        value,
+      }));
 
       appDoc.integrations = { intro, items };
       await appDoc.save();
 
       return { ok: true, integrations: appDoc.integrations };
-    }
+    },
   );
 
   //Userflow Walkthrough
   app.patch(
     "/:appId/user-flow-walkthroughs",
-    { preHandler: app.requireAuth },
+    {
+    preHandler: app.requireAuth,
+    bodyLimit: 500 * 1024,
+    config: {
+      rateLimit: {
+        max: 20,
+        timeWindow: "1 minute",
+      },
+    },
+  },
     async (req: any, reply: any) => {
       const parsed = userFlowWalkthroughsSchema.safeParse(req.body);
-      console.log("Req body:",JSON.stringify(parsed));
       if (!parsed.success) return reply.code(400).send(parsed.error.flatten());
 
       const clerkUserId = req.auth.clerkUserId;
@@ -958,73 +1277,126 @@ export default async function appsRoutes(app: any) {
       (appDoc as any).userFlowWalkthroughs = parsed.data;
 
       await appDoc.save();
-      return { ok: true, userFlowWalkthroughs: (appDoc as any).userFlowWalkthroughs };
-    }
+      return {
+        ok: true,
+        userFlowWalkthroughs: (appDoc as any).userFlowWalkthroughs,
+      };
+    },
   );
 
   app.post(
     "/:appId/screenshot-groups",
-    { preHandler: app.requireAuth },
+    {
+    preHandler: app.requireAuth,
+    bodyLimit: 500 * 1024,
+    config: {
+      rateLimit: {
+        max: 20,
+        timeWindow: "1 minute",
+      },
+    },
+  },
     async (req: any, reply: any) => {
       const parsed = screenshotGroupCreateSchema.safeParse(req.body);
       if (!parsed.success) return reply.code(400).send(parsed.error.flatten());
 
-      const user = await UserModel.findOne({ clerkUserId: req.auth.clerkUserId });
+      const user = await UserModel.findOne({
+        clerkUserId: req.auth.clerkUserId,
+      });
       if (!user) return reply.code(401).send({ message: "Unauthorized" });
       if (!requirePro(user, reply)) return;
 
-      const appDoc = await AppModel.findOne({ _id: req.params.appId, userId: user._id });
+      const appDoc = await AppModel.findOne({
+        _id: req.params.appId,
+        userId: user._id,
+      });
       if (!appDoc) return reply.code(404).send({ message: "App not found" });
 
-      const exists = appDoc.screenshotGroups.some((g: any) => g.key === parsed.data.key);
-      if (exists) return reply.code(409).send({ message: "Group key already exists" });
+      const exists = appDoc.screenshotGroups.some(
+        (g: any) => g.key === parsed.data.key,
+      );
+      if (exists)
+        return reply.code(409).send({ message: "Group key already exists" });
 
       appDoc.screenshotGroups.push(parsed.data);
       await appDoc.save();
 
       return { screenshotGroups: appDoc.screenshotGroups };
-    }
+    },
   );
 
   app.patch(
     "/:appId/screenshot-groups/:groupKey",
-    { preHandler: app.requireAuth },
+    {
+    preHandler: app.requireAuth,
+    bodyLimit: 100 * 1024,
+    config: {
+      rateLimit: {
+        max: 20,
+        timeWindow: "1 minute",
+      },
+    },
+  },
     async (req: any, reply: any) => {
       const parsed = screenshotGroupUpdateSchema.safeParse(req.body);
       if (!parsed.success) return reply.code(400).send(parsed.error.flatten());
 
-      const user = await UserModel.findOne({ clerkUserId: req.auth.clerkUserId });
+      const user = await UserModel.findOne({
+        clerkUserId: req.auth.clerkUserId,
+      });
       if (!user) return reply.code(401).send({ message: "Unauthorized" });
       if (!requirePro(user, reply)) return;
 
-      const appDoc = await AppModel.findOne({ _id: req.params.appId, userId: user._id });
+      const appDoc = await AppModel.findOne({
+        _id: req.params.appId,
+        userId: user._id,
+      });
       if (!appDoc) return reply.code(404).send({ message: "App not found" });
 
-      const g = appDoc.screenshotGroups.find((x: any) => x.key === req.params.groupKey);
+      const g = appDoc.screenshotGroups.find(
+        (x: any) => x.key === req.params.groupKey,
+      );
       if (!g) return reply.code(404).send({ message: "Group not found" });
 
       if (parsed.data.title !== undefined) g.title = parsed.data.title;
-      if (parsed.data.description !== undefined) g.description = parsed.data.description;
+      if (parsed.data.description !== undefined)
+        g.description = parsed.data.description;
 
       await appDoc.save();
       return { screenshotGroups: appDoc.screenshotGroups };
-    }
+    },
   );
 
   app.delete(
     "/:appId/screenshot-groups/:groupKey",
-    { preHandler: app.requireAuth },
+    {
+    preHandler: app.requireAuth,
+    bodyLimit: 100 * 1024,
+    config: {
+      rateLimit: {
+        max: 20,
+        timeWindow: "1 minute",
+      },
+    },
+  },
     async (req: any, reply: any) => {
-      const user = await UserModel.findOne({ clerkUserId: req.auth.clerkUserId });
+      const user = await UserModel.findOne({
+        clerkUserId: req.auth.clerkUserId,
+      });
       if (!user) return reply.code(401).send({ message: "Unauthorized" });
       if (!requirePro(user, reply)) return;
 
-      const appDoc = await AppModel.findOne({ _id: req.params.appId, userId: user._id });
+      const appDoc = await AppModel.findOne({
+        _id: req.params.appId,
+        userId: user._id,
+      });
       if (!appDoc) return reply.code(404).send({ message: "App not found" });
 
       const key = req.params.groupKey;
 
-      appDoc.screenshotGroups = appDoc.screenshotGroups.filter((g: any) => g.key !== key);
+      appDoc.screenshotGroups = appDoc.screenshotGroups.filter(
+        (g: any) => g.key !== key,
+      );
 
       // unassign screenshots
       appDoc.screenshots.forEach((s: any) => {
@@ -1032,8 +1404,10 @@ export default async function appsRoutes(app: any) {
       });
 
       await appDoc.save();
-      return { screenshotGroups: appDoc.screenshotGroups, screenshots: appDoc.screenshots };
-    }
+      return {
+        screenshotGroups: appDoc.screenshotGroups,
+        screenshots: appDoc.screenshots,
+      };
+    },
   );
-
 }

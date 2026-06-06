@@ -2,6 +2,7 @@ import Razorpay from "razorpay";
 import crypto from "crypto";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import Stripe from "stripe";
+import rateLimit from "@fastify/rate-limit";
 
 import { UserModel } from "../models/user.model.js";
 import { resolvePricingFromRequest } from "../lib/resolvePricingFromRequest.js";
@@ -10,6 +11,7 @@ import {
   type Billing,
   type BillingRegion,
 } from "../lib/billingConfig.js";
+import fs from "fs";
 
 type AuthedRequest = FastifyRequest & {
   auth?: {
@@ -23,6 +25,7 @@ type CheckoutBody = {
 
 type RazorpayVerifyBody = {
   razorpay_payment_id?: string;
+  razorpay_subscription_id?: string;
   razorpay_signature?: string;
 };
 
@@ -51,11 +54,18 @@ type RazorpayWebhookBody = {
   account_id?: string;
 };
 
+type RawBodyRequest = FastifyRequest & {
+  rawBody?: Buffer;
+};
+
 function hmacSHA256Hex(payload: string | Buffer, secret: string) {
   return crypto.createHmac("sha256", secret).update(payload).digest("hex");
 }
 
 function safeEqualHex(a: string, b: string) {
+  if (!/^[a-fA-F0-9]+$/.test(a)) return false;
+  if (!/^[a-fA-F0-9]+$/.test(b)) return false;
+
   const aBuf = Buffer.from(a, "hex");
   const bBuf = Buffer.from(b, "hex");
   if (aBuf.length !== bBuf.length) return false;
@@ -78,9 +88,9 @@ function getClerkUserId(req: FastifyRequest): string | null {
 function hasLockedBillingProfile(user: any) {
   return Boolean(
     user?.billingCountry &&
-      user?.billingCurrency &&
-      user?.billingRegion &&
-      user?.provider
+    user?.billingCurrency &&
+    user?.billingRegion &&
+    user?.provider,
   );
 }
 
@@ -126,7 +136,8 @@ function hasOpenSubscriptionState(user: any) {
   }
 
   const hasProviderSubscription =
-    Boolean(user?.razorpaySubscriptionId) || Boolean(user?.stripeSubscriptionId);
+    Boolean(user?.razorpaySubscriptionId) ||
+    Boolean(user?.stripeSubscriptionId);
 
   if (hasProviderSubscription && String(user?.planStatus) !== "CANCELED") {
     return true;
@@ -165,7 +176,10 @@ function setPlanFromStripeStatus(user: any, status: string | null | undefined) {
   user.planStatus = "CANCELED";
 }
 
-function setPlanFromRazorpayStatus(user: any, status: string | null | undefined) {
+function setPlanFromRazorpayStatus(
+  user: any,
+  status: string | null | undefined,
+) {
   const s = String(status || "").toLowerCase();
 
   if (s === "active") {
@@ -199,7 +213,30 @@ function isStillWithinPaidPeriod(user: any) {
   return new Date(user.planValidUntil).getTime() > Date.now();
 }
 
+function getRazorpayTotalCount(billing: Billing) {
+  if (billing === "MONTHLY") {
+    return 100;
+  }
+
+  if (billing === "YEARLY") {
+    return 10;
+  }
+
+  return 100;
+}
+
 export async function billingRoutes(app: FastifyInstance) {
+  if (!process.env.RAZORPAY_KEY_ID) {
+    throw new Error("RAZORPAY_KEY_ID is missing");
+  }
+
+  if (!process.env.RAZORPAY_KEY_SECRET) {
+    throw new Error("RAZORPAY_KEY_SECRET is missing");
+  }
+
+  if (!process.env.RAZORPAY_WEBHOOK_SECRET) {
+    throw new Error("RAZORPAY_WEBHOOK_SECRET is missing");
+  }
   const razorpay = new Razorpay({
     key_id: process.env.RAZORPAY_KEY_ID!,
     key_secret: process.env.RAZORPAY_KEY_SECRET!,
@@ -229,25 +266,59 @@ export async function billingRoutes(app: FastifyInstance) {
   //   }
   // );
 
-  app.get("/pricing-context", async (req, reply) => {
-    const pricing = resolvePricingFromRequest(req);
-
-    return reply.send({
-      country: pricing.country,
-      region: pricing.region,
-      currency: pricing.currency,
-      provider: pricing.provider,
-      prices: {
-        monthly: pricing.prices.MONTHLY,
-        yearly: pricing.prices.YEARLY,
-        yearlyAnchor: pricing.prices.MONTHLY * 12,
+  app.get(
+    "/pricing-context",
+    {
+      config: {
+        rateLimit: {
+          max: 60,
+          timeWindow: "1 minute",
+        },
       },
-    });
-  });
+    },
+    async (req, reply) => {
+      const pricing = resolvePricingFromRequest(req);
+
+      return reply.send({
+        country: pricing.country,
+        region: pricing.region,
+        currency: pricing.currency,
+        provider: pricing.provider,
+        prices: {
+          monthly: pricing.prices.MONTHLY,
+          yearly: pricing.prices.YEARLY,
+          yearlyAnchor: pricing.prices.MONTHLY * 12,
+        },
+      });
+    },
+  );
 
   app.post<{ Body: CheckoutBody }>(
     "/checkout",
-    { preHandler: app.requireAuth },
+    // { preHandler: app.requireAuth },
+    {
+      preHandler: app.requireAuth,
+      bodyLimit: 10 * 1024,
+      config: {
+        rateLimit: {
+          max: 5,
+          timeWindow: "1 minute",
+        },
+      },
+      schema: {
+        body: {
+          type: "object",
+          additionalProperties: false,
+          required: ["billing"],
+          properties: {
+            billing: {
+              type: "string",
+              enum: ["MONTHLY", "YEARLY"],
+            },
+          },
+        },
+      },
+    },
     async (req, reply) => {
       const clerkUserId = getClerkUserId(req);
       if (!clerkUserId) {
@@ -266,11 +337,14 @@ export async function billingRoutes(app: FastifyInstance) {
 
       if (hasOpenSubscriptionState(user)) {
         return reply.code(409).send({
-          message: "Subscription already exists or is still active for this user",
+          message:
+            "Subscription already exists or is still active for this user",
         });
       }
 
       const pricing = resolvePricingForUser(req, user);
+
+      console.log("Pricing provider:", pricing);
 
       try {
         if (pricing.provider === "razorpay") {
@@ -282,12 +356,14 @@ export async function billingRoutes(app: FastifyInstance) {
 
           const planId = pricing.config.razorpayPlanIds[billing];
           if (!planId) {
-            return reply.code(500).send({ message: "Missing Razorpay plan ID" });
+            return reply
+              .code(500)
+              .send({ message: "Missing Razorpay plan ID" });
           }
 
           const subscription = await razorpay.subscriptions.create({
             plan_id: planId,
-            total_count: 120,
+            total_count: getRazorpayTotalCount(billing),
             quantity: 1,
             notes: {
               userId: String(user._id),
@@ -386,17 +462,122 @@ export async function billingRoutes(app: FastifyInstance) {
         //   url: session.url,
         // });
       } catch (error: any) {
+        // console.log("Error in checkout:", error);
         req.log.error({ error }, "Billing checkout failed");
-        return reply
-          .code(500)
-          .send({ message: error?.message || "Unable to create checkout" });
+        return (
+          reply
+            .code(500)
+            // .send({ message: error?.message || "Unable to create checkout" });
+            .send({ message: "Unable to create checkout" })
+        );
       }
-    }
+    },
   );
+
+  // V1
+  // app.post<{ Body: RazorpayVerifyBody }>(
+  //   "/razorpay/verify-subscription",
+  //   { preHandler: app.requireAuth },
+  //   async (req, reply) => {
+  //     const clerkUserId = getClerkUserId(req);
+  //     if (!clerkUserId) {
+  //       return reply.code(401).send({ message: "Unauthorized" });
+  //     }
+
+  //     const user = await UserModel.findOne({ clerkUserId });
+  //     if (!user) {
+  //       return reply.code(401).send({ message: "Unauthorized" });
+  //     }
+
+  //     const {
+  //       razorpay_payment_id,
+  //       razorpay_subscription_id,
+  //       razorpay_signature,
+  //     } = req.body || {};
+  //     if (
+  //       !razorpay_payment_id ||
+  //       !razorpay_subscription_id ||
+  //       !razorpay_signature
+  //     ) {
+  //       return reply.code(400).send({ message: "Missing payment fields" });
+  //     }
+
+  //     const subId = user.razorpaySubscriptionId;
+  //     if (!subId) {
+  //       return reply
+  //         .code(400)
+  //         .send({ message: "No Razorpay subscription found" });
+  //     }
+
+  //     if (razorpay_subscription_id !== subId) {
+  //       return reply.code(400).send({ message: "Subscription ID mismatch" });
+  //     }
+
+  //     const expected = hmacSHA256Hex(
+  //       `${razorpay_payment_id}|${subId}`,
+  //       process.env.RAZORPAY_KEY_SECRET!,
+  //     );
+
+  //     if (!safeEqualHex(expected, razorpay_signature)) {
+  //       return reply.code(400).send({ message: "Invalid Razorpay signature" });
+  //     }
+
+  //     user.plan = "PRO";
+  //     user.planStatus = "ACTIVE";
+  //     user.planPurchasedAt = new Date();
+  //     user.lastPaymentAt = new Date();
+  //     user.cancelAtPeriodEnd = false;
+  //     await user.save();
+
+  //     return reply.send({
+  //       success: true,
+  //       provider: "razorpay",
+  //       plan: user.plan,
+  //       planStatus: user.planStatus,
+  //     });
+  //   },
+  // );
 
   app.post<{ Body: RazorpayVerifyBody }>(
     "/razorpay/verify-subscription",
-    { preHandler: app.requireAuth },
+    // { preHandler: app.requireAuth },
+    {
+      preHandler: app.requireAuth,
+      bodyLimit: 10 * 1024,
+      config: {
+        rateLimit: {
+          max: 10,
+          timeWindow: "1 minute",
+        },
+      },
+      schema: {
+        body: {
+          type: "object",
+          additionalProperties: false,
+          required: [
+            "razorpay_payment_id",
+            "razorpay_subscription_id",
+            "razorpay_signature",
+          ],
+          properties: {
+            razorpay_payment_id: {
+              type: "string",
+              minLength: 1,
+              maxLength: 100,
+            },
+            razorpay_subscription_id: {
+              type: "string",
+              minLength: 1,
+              maxLength: 100,
+            },
+            razorpay_signature: {
+              type: "string",
+              pattern: "^[a-fA-F0-9]{64}$",
+            },
+          },
+        },
+      },
+    },
     async (req, reply) => {
       const clerkUserId = getClerkUserId(req);
       if (!clerkUserId) {
@@ -408,30 +589,98 @@ export async function billingRoutes(app: FastifyInstance) {
         return reply.code(401).send({ message: "Unauthorized" });
       }
 
-      const { razorpay_payment_id, razorpay_signature } = req.body || {};
-      if (!razorpay_payment_id || !razorpay_signature) {
+      const {
+        razorpay_payment_id,
+        razorpay_subscription_id,
+        razorpay_signature,
+      } = req.body || {};
+      if (
+        !razorpay_payment_id ||
+        !razorpay_subscription_id ||
+        !razorpay_signature
+      ) {
         return reply.code(400).send({ message: "Missing payment fields" });
       }
 
       const subId = user.razorpaySubscriptionId;
       if (!subId) {
-        return reply.code(400).send({ message: "No Razorpay subscription found" });
+        return reply
+          .code(400)
+          .send({ message: "No Razorpay subscription found" });
+      }
+
+      if (razorpay_subscription_id !== subId) {
+        return reply.code(400).send({ message: "Subscription ID mismatch" });
       }
 
       const expected = hmacSHA256Hex(
         `${razorpay_payment_id}|${subId}`,
-        process.env.RAZORPAY_KEY_SECRET!
+        process.env.RAZORPAY_KEY_SECRET!,
       );
 
       if (!safeEqualHex(expected, razorpay_signature)) {
         return reply.code(400).send({ message: "Invalid Razorpay signature" });
       }
 
-      user.plan = "PRO";
-      user.planStatus = "ACTIVE";
-      user.planPurchasedAt = new Date();
+      const razorpaySubscription = await razorpay.subscriptions.fetch(subId);
+
+      const subscriptionStatus = (razorpaySubscription as any)?.status;
+      const currentStart = toDateFromUnix(
+        (razorpaySubscription as any)?.current_start,
+      );
+
+      const currentEnd = toDateFromUnix(
+        (razorpaySubscription as any)?.current_end,
+      );
+
+      // fs.writeFileSync(
+      //   "output.json",
+      //   JSON.stringify(
+      //     {
+      //       id: (razorpaySubscription as any)?.id,
+      //       status: (razorpaySubscription as any)?.status,
+      //       current_start: (razorpaySubscription as any)?.current_start,
+      //       current_end: (razorpaySubscription as any)?.current_end,
+      //       start_at: (razorpaySubscription as any)?.start_at,
+      //       end_at: (razorpaySubscription as any)?.end_at,
+      //       charge_at: (razorpaySubscription as any)?.charge_at,
+      //       paid_count: (razorpaySubscription as any)?.paid_count,
+      //       remaining_count: (razorpaySubscription as any)?.remaining_count,
+      //     },
+      //     null,
+      //     2,
+      //   ),
+      // );
+
+      // user.plan = "PRO";
+      // user.planStatus = "ACTIVE";
+      user.provider = "razorpay";
+      user.razorpaySubscriptionId = subId;
+      user.planPurchasedAt = user.planPurchasedAt || new Date();
       user.lastPaymentAt = new Date();
       user.cancelAtPeriodEnd = false;
+
+      if (currentStart) {
+        user.currentPeriodStart = currentStart;
+      }
+
+      if (currentEnd) {
+        user.planValidUntil = currentEnd;
+      }
+
+      if (subscriptionStatus === "active" && currentEnd) {
+        user.plan = "PRO";
+        user.planStatus = "ACTIVE";
+      } else if (
+        subscriptionStatus === "authenticated" ||
+        subscriptionStatus === "created"
+      ) {
+        user.plan = "FREE";
+        user.planStatus = "INACTIVE";
+      } else {
+        setPlanFromRazorpayStatus(user, subscriptionStatus);
+      }
+
       await user.save();
 
       return reply.send({
@@ -439,10 +688,14 @@ export async function billingRoutes(app: FastifyInstance) {
         provider: "razorpay",
         plan: user.plan,
         planStatus: user.planStatus,
+        planValidUntil: user.planValidUntil,
+        razorpayStatus: subscriptionStatus,
       });
-    }
+    },
   );
+
   // Razor pay webhook
+  // V1
   // app.post("/razorpay/webhook", async (req, reply) => {
   //   try {
   //     const signature = req.headers["x-razorpay-signature"];
@@ -543,6 +796,421 @@ export async function billingRoutes(app: FastifyInstance) {
   //     return reply.code(500).send({ message: "Razorpay webhook processing failed" });
   //   }
   // });
+
+  // v2
+  // app.post(
+  //   "/razorpay/webhook",
+  //   {
+  //     config: {
+  //       rawBody: true,
+  //     },
+  //   },
+  //   async (req, reply) => {
+  //     try {
+  //       console.log("RAZORPAY WEBHOOK HIT");
+
+  //       console.log("RAZORPAY WEBHOOK HEADERS:", {
+  //         signature: req.headers["x-razorpay-signature"],
+  //         contentType: req.headers["content-type"],
+  //       });
+
+  //       console.log("RAZORPAY WEBHOOK BODY:", req.body);
+  //       const signature = req.headers["x-razorpay-signature"];
+  //       const secret = process.env.RAZORPAY_WEBHOOK_SECRET;
+
+  //       if (!signature || !secret) {
+  //         return reply
+  //           .code(400)
+  //           .send({ message: "Missing Razorpay webhook signature" });
+  //       }
+
+  //       const rawBody = (req as RawBodyRequest).rawBody;
+
+  //       if (!rawBody) {
+  //         return reply.code(400).send({ message: "Missing raw body" });
+  //       }
+
+  //       const expected = hmacSHA256Hex(rawBody, secret);
+
+  //       if (!safeEqualHex(expected, String(signature))) {
+  //         return reply
+  //           .code(400)
+  //           .send({ message: "Invalid Razorpay webhook signature" });
+  //       }
+
+  //       const event = req.body as RazorpayWebhookBody;
+
+  //       const eventName = String(event?.event || "");
+  //       const subscriptionEntity = event?.payload?.subscription?.entity;
+  //       const paymentEntity = event?.payload?.payment?.entity;
+  //       const subscriptionId = subscriptionEntity?.id;
+
+  //       console.log("RAZORPAY WEBHOOK EVENT:", {
+  //         event: event?.event,
+  //         subscriptionId: event?.payload?.subscription?.entity?.id,
+  //         status: event?.payload?.subscription?.entity?.status,
+  //         current_start: event?.payload?.subscription?.entity?.current_start,
+  //         current_end: event?.payload?.subscription?.entity?.current_end,
+  //         paymentStatus: event?.payload?.payment?.entity?.status,
+  //       });
+
+  //       if (!subscriptionId) {
+  //         return reply.send({ received: true,  reason: "No subscription id" });
+  //       }
+
+  //       //         const user = await UserModel.findOne({
+  //       //           razorpaySubscriptionId: subscriptionId,
+  //       //         });
+
+  //       //         console.log("RAZORPAY WEBHOOK USER FOUND:", {
+  //       //   found: Boolean(user),
+  //       //   subscriptionId,
+  //       // });
+
+  //       //         if (!user) {
+  //       //           return reply.send({ received: true });
+  //       //         }
+
+  //       let user = await UserModel.findOne({
+  //         razorpaySubscriptionId: subscriptionId,
+  //       });
+
+  //       if (!user) {
+  //         const notes = subscriptionEntity?.notes || {};
+
+  //         user = await UserModel.findOne({
+  //           $or: [{ _id: notes.userId }, { clerkUserId: notes.clerkUserId }],
+  //         });
+  //       }
+
+  //       console.log("RAZORPAY WEBHOOK USER FOUND:", {
+  //         found: Boolean(user),
+  //         subscriptionId,
+  //         userIdFromNotes: subscriptionEntity?.notes?.userId,
+  //         clerkUserIdFromNotes: subscriptionEntity?.notes?.clerkUserId,
+  //         notes: subscriptionEntity?.notes,
+  //       });
+
+  //       if (!user) {
+  //         return reply.send({ received: true, userFound: false });
+  //       }
+
+  //       const eventId = String(req.headers["x-razorpay-event-id"] || "");
+
+  //       if (eventId && user.lastWebhookEventId === eventId) {
+  //         return reply.send({ received: true, deduped: true });
+  //       }
+
+  //       if (eventId) {
+  //         user.lastWebhookEventId = eventId;
+  //       }
+
+  //       user.provider = "razorpay";
+  //       user.razorpaySubscriptionId = subscriptionId;
+
+  //       // const eventId = [
+  //       //   String(event?.account_id || ""),
+  //       //   eventName,
+  //       //   subscriptionId,
+  //       //   String(event?.created_at || ""),
+  //       //   String(paymentEntity?.id || ""),
+  //       // ].join(":");
+
+  //       if (user.lastWebhookEventId === eventId) {
+  //         return reply.send({ received: true, deduped: true });
+  //       }
+
+  //       user.lastWebhookEventId = eventId;
+  //       user.provider = "razorpay";
+
+  //       const subscriptionStatus = subscriptionEntity?.status;
+
+  //       setPlanFromRazorpayStatus(user, subscriptionStatus);
+
+  //       const currentStart = toDateFromUnix(subscriptionEntity?.current_start);
+  //       const currentEnd = toDateFromUnix(subscriptionEntity?.current_end);
+  //       const endedAt = toDateFromUnix(subscriptionEntity?.ended_at);
+
+  //       if (currentStart) {
+  //         user.currentPeriodStart = currentStart;
+  //       }
+
+  //       if (currentEnd) {
+  //         user.planValidUntil = currentEnd;
+  //       }
+
+  //       if (endedAt) {
+  //         user.subscriptionEndedAt = endedAt;
+  //       }
+
+  //       if (eventName === "subscription.authenticated") {
+  //         user.planPurchasedAt = user.planPurchasedAt || new Date();
+  //         user.planStatus = "INACTIVE";
+  //       }
+
+  //       if (
+  //         eventName === "subscription.activated" ||
+  //         eventName === "subscription.charged" ||
+  //         eventName === "subscription.updated" ||
+  //         eventName === "subscription.resumed" ||
+  //         subscriptionStatus === "active"
+  //       ) {
+  //         user.plan = "PRO";
+  //         user.planStatus = "ACTIVE";
+  //         user.planPurchasedAt = user.planPurchasedAt || new Date();
+  //         user.lastPaymentAt = new Date();
+  //         user.cancelAtPeriodEnd = false;
+  //       }
+
+  //       if (
+  //         eventName === "subscription.pending" ||
+  //         eventName === "subscription.halted"
+  //       ) {
+  //         user.plan = "PRO";
+  //         user.planStatus = "PAST_DUE";
+  //       }
+
+  //       if (
+  //         eventName === "subscription.cancelled" ||
+  //         eventName === "subscription.completed" ||
+  //         eventName === "subscription.expired"
+  //       ) {
+  //         user.cancelAtPeriodEnd = true;
+
+  //         if (!isStillWithinPaidPeriod(user)) {
+  //           user.plan = "FREE";
+  //           user.planStatus = "CANCELED";
+  //         }
+  //       }
+
+  //       if (paymentEntity?.status === "captured") {
+  //         user.lastPaymentAt = new Date();
+
+  //         if (currentEnd) {
+  //           user.planValidUntil = currentEnd;
+  //         }
+
+  //         user.plan = "PRO";
+  //         user.planStatus = "ACTIVE";
+  //       }
+
+  //       if (paymentEntity?.status === "failed") {
+  //         user.plan = "PRO";
+  //         user.planStatus = "PAST_DUE";
+  //         user.lastPaymentFailedAt = new Date();
+  //         user.lastPaymentFailureReason = paymentEntity?.error_description;
+  //       }
+
+  //       await user.save();
+
+  //       return reply.send({ received: true });
+  //     } catch (error: any) {
+  //       req.log.error({ error }, "Razorpay webhook failed");
+
+  //       return reply
+  //         .code(500)
+  //         .send({ message: "Razorpay webhook processing failed" });
+  //     }
+  //   },
+  // );
+
+  // V3
+  app.post(
+    "/razorpay/webhook",
+    // {
+    //   config: {
+    //     rawBody: true,
+    //   },
+    // },
+    {
+      bodyLimit: 256 * 1024,
+      config: {
+        rawBody: true,
+        rateLimit: {
+          max: 120,
+          timeWindow: "1 minute",
+        },
+      },
+    },
+    async (req, reply) => {
+      try {
+        // console.log("RAZORPAY WEBHOOK HIT");
+
+        // console.log("RAZORPAY WEBHOOK HEADERS:", {
+        //   signature: req.headers["x-razorpay-signature"],
+        //   contentType: req.headers["content-type"],
+        // });
+
+        // console.log("RAZORPAY WEBHOOK BODY:", req.body);
+        const signature = req.headers["x-razorpay-signature"];
+        const secret = process.env.RAZORPAY_WEBHOOK_SECRET;
+
+        if (!signature || !secret) {
+          return reply
+            .code(400)
+            .send({ message: "Missing Razorpay webhook signature" });
+        }
+
+        const rawBody = (req as RawBodyRequest).rawBody;
+
+        if (!rawBody) {
+          return reply.code(400).send({ message: "Missing raw body" });
+        }
+
+        const expected = hmacSHA256Hex(rawBody, secret);
+
+        if (!safeEqualHex(expected, String(signature))) {
+          return reply
+            .code(400)
+            .send({ message: "Invalid Razorpay webhook signature" });
+        }
+
+        const event = req.body as RazorpayWebhookBody;
+
+        const eventName = String(event?.event || "");
+        const subscriptionEntity = event?.payload?.subscription?.entity;
+        const paymentEntity = event?.payload?.payment?.entity;
+        const subscriptionId = subscriptionEntity?.id;
+
+        // console.log("RAZORPAY WEBHOOK EVENT:", {
+        //   event: eventName,
+        //   subscriptionId,
+        //   status: subscriptionEntity?.status,
+        //   current_start: subscriptionEntity?.current_start,
+        //   current_end: subscriptionEntity?.current_end,
+        //   paymentStatus: paymentEntity?.status,
+        //   notes: subscriptionEntity?.notes,
+        // });
+
+        if (!subscriptionId) {
+          return reply.send({ received: true, reason: "No subscription id" });
+        }
+
+        let user = await UserModel.findOne({
+          razorpaySubscriptionId: subscriptionId,
+        });
+
+        if (!user) {
+          const notes = subscriptionEntity?.notes || {};
+
+          user = await UserModel.findOne({
+            $or: [{ _id: notes.userId }, { clerkUserId: notes.clerkUserId }],
+          });
+        }
+
+        console.log("RAZORPAY WEBHOOK USER FOUND:", {
+          found: Boolean(user),
+          subscriptionId,
+          notes: subscriptionEntity?.notes,
+        });
+
+        if (!user) {
+          return reply.send({ received: true, userFound: false });
+        }
+
+        const eventId = String(req.headers["x-razorpay-event-id"] || "");
+
+        if (eventId && user.lastWebhookEventId === eventId) {
+          return reply.send({ received: true, deduped: true });
+        }
+
+        if (eventId) {
+          user.lastWebhookEventId = eventId;
+        }
+
+        user.provider = "razorpay";
+        user.razorpaySubscriptionId = subscriptionId;
+
+        const subscriptionStatus = subscriptionEntity?.status;
+
+        setPlanFromRazorpayStatus(user, subscriptionStatus);
+
+        const currentStart = toDateFromUnix(subscriptionEntity?.current_start);
+        const currentEnd = toDateFromUnix(subscriptionEntity?.current_end);
+        const endedAt = toDateFromUnix(subscriptionEntity?.ended_at);
+
+        if (currentStart) {
+          user.currentPeriodStart = currentStart;
+        }
+
+        if (currentEnd) {
+          user.planValidUntil = currentEnd;
+        }
+
+        if (endedAt) {
+          user.subscriptionEndedAt = endedAt;
+        }
+
+        if (eventName === "subscription.authenticated") {
+          user.planPurchasedAt = user.planPurchasedAt || new Date();
+          user.planStatus = "INACTIVE";
+        }
+
+        if (
+          eventName === "subscription.activated" ||
+          eventName === "subscription.charged" ||
+          eventName === "subscription.updated" ||
+          eventName === "subscription.resumed" ||
+          subscriptionStatus === "active"
+        ) {
+          user.plan = "PRO";
+          user.planStatus = "ACTIVE";
+          user.planPurchasedAt = user.planPurchasedAt || new Date();
+          user.lastPaymentAt = new Date();
+          user.cancelAtPeriodEnd = false;
+        }
+
+        if (
+          eventName === "subscription.pending" ||
+          eventName === "subscription.halted"
+        ) {
+          user.plan = "PRO";
+          user.planStatus = "PAST_DUE";
+        }
+
+        if (
+          eventName === "subscription.cancelled" ||
+          eventName === "subscription.completed" ||
+          eventName === "subscription.expired"
+        ) {
+          user.cancelAtPeriodEnd = true;
+
+          if (!isStillWithinPaidPeriod(user)) {
+            user.plan = "FREE";
+            user.planStatus = "CANCELED";
+          }
+        }
+
+        if (paymentEntity?.status === "captured") {
+          user.lastPaymentAt = new Date();
+
+          if (currentEnd) {
+            user.planValidUntil = currentEnd;
+          }
+
+          user.plan = "PRO";
+          user.planStatus = "ACTIVE";
+        }
+
+        if (paymentEntity?.status === "failed") {
+          user.plan = "PRO";
+          user.planStatus = "PAST_DUE";
+          user.lastPaymentFailedAt = new Date();
+          user.lastPaymentFailureReason = paymentEntity?.error_description;
+        }
+
+        await user.save();
+
+        return reply.send({ received: true });
+      } catch (error: any) {
+        req.log.error({ error }, "Razorpay webhook failed");
+
+        return reply
+          .code(500)
+          .send({ message: "Razorpay webhook processing failed" });
+      }
+    },
+  );
 
   // Stripe webhook
   // app.post("/stripe/webhook", async (req, reply) => {

@@ -15,10 +15,11 @@ export default async function usersRoutes(app: any) {
     { preHandler: app.requireAuth },
     async (req: any, reply: any) => {
       const clerkUserId = req.auth.clerkUserId;
-
+      console.log("Checking user onboarding for:", clerkUserId);
       const user = await getUserByClerkId(clerkUserId);
+      console.log("User found:", user ? user._id : "No user");
       if (!user) {
-        return reply.code(404).send({ onboarded: false });
+        return reply.send({ onboarded: false });
       }
 
       return { onboarded: true, user };
