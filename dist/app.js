@@ -54,7 +54,6 @@
 // V2 secure server
 import Fastify from "fastify";
 import cors from "@fastify/cors";
-import helmet from "@fastify/helmet";
 import rateLimit from "@fastify/rate-limit";
 import sensible from "@fastify/sensible";
 import fastifyRawBody from "fastify-raw-body";
@@ -67,6 +66,7 @@ import appsRoutes from "./routes/apps.routes";
 import usersRoutes from "./routes/users.routes";
 import uploadsRoutes from "./routes/uploads.routes";
 import { billingRoutes } from "./routes/billing.routes";
+import helmet from "@fastify/helmet";
 function getAllowedOrigins() {
     if (process.env.NODE_ENV === "production") {
         return [
