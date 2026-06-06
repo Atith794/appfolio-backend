@@ -1,6 +1,16 @@
 import { UserModel } from "../models/user.model";
 import { AppModel } from "../models/app.model";
 import { effectivePlan } from "../lib/entitlements";
+import { Types } from "mongoose";
+
+type LeanPublicUser = {
+  _id: Types.ObjectId;
+  username: string;
+  displayName?: string;
+  bio?: string;
+  plan: "FREE" | "PRO";
+  planStatus?: string;
+};
 
 function sanitizePublicApp(appDoc: any, plan: string) {
   const isPro = plan === "PRO";
@@ -101,7 +111,8 @@ export default async function publicRoutes(app: any) {
   app.get("/u/:username", async (req: any, reply: any) => {
     const { username } = req.params;
 
-    const user = await UserModel.findOne({ username }).lean();
+    // const user = await UserModel.findOne({ username }).lean();
+    const user = (await UserModel.findOne({ username }).lean()) as LeanPublicUser | null;
     if (!user) return reply.code(404).send({ message: "User not found" });
 
     const apps = await AppModel.find({
@@ -141,7 +152,9 @@ export default async function publicRoutes(app: any) {
   app.get("/u/:username/:slug", async (req: any, reply: any) => {
     const { username, slug } = req.params;
 
-    const user = await UserModel.findOne({ username }).lean();
+    // const user = await UserModel.findOne({ username }).lean();
+    const user = (await UserModel.findOne({ username }).lean()) as LeanPublicUser | null;
+    
     if (!user) return reply.code(404).send({ message: "User not found" });
 
     const plan = effectivePlan(user); // "FREE" | "PRO"

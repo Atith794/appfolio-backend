@@ -11,16 +11,6 @@ export type RazorpayBillingConfig = {
   razorpayPlanIds: Record<Billing, string>;
 };
 
-// export type StripeBillingConfig = {
-//   region: "UK" | "EU" | "ROW";
-//   currency: "GBP" | "EUR" | "USD";
-//   provider: "stripe";
-//   prices: Record<Billing, number>;
-//   stripePriceIds: Record<Billing, string>;
-// };
-
-// export type BillingConfig = RazorpayBillingConfig | StripeBillingConfig;
-
 export type BillingConfig = RazorpayBillingConfig ;
 
 export const REGION_COUNTRY_MAP: Record<string, BillingRegion> = {

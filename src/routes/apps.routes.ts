@@ -1,12 +1,21 @@
 import { z } from "zod";
 import { UserModel } from "../models/user.model";
 import { AppModel } from "../models/app.model";
-// import { slugify } from "../utils/slug.js";
 import { Types } from "mongoose";
 import axios from "axios";
 import { generateCover } from "../utils/generateCover.js";
 import { v2 as cloudinary } from "cloudinary";
 import { getScreenshotLimit } from "../utils/limits.js";
+
+type LeanUser = {
+  _id: Types.ObjectId;
+  clerkUserId: string;
+  username?: string;
+  displayName?: string;
+  bio?: string;
+  plan: "FREE" | "PRO";
+  planStatus?: string;
+};
 
 function isValidObjectId(id: string) {
   return Types.ObjectId.isValid(id);
@@ -23,31 +32,39 @@ function requirePro(user: any, reply: any) {
   return true;
 }
 
-const screenshotGroupCreateSchema = z.object({
-  key: z
-    .string()
-    .min(2)
-    .max(32)
-    .regex(/^[a-z0-9-]+$/), // simple slug
-  title: z.string().min(2).max(60),
-  description: z.string().max(140).optional().default(""),
-}).strict();
+const screenshotGroupCreateSchema = z
+  .object({
+    key: z
+      .string()
+      .min(2)
+      .max(32)
+      .regex(/^[a-z0-9-]+$/), // simple slug
+    title: z.string().min(2).max(60),
+    description: z.string().max(140).optional().default(""),
+  })
+  .strict();
 
-const screenshotGroupUpdateSchema = z.object({
-  title: z.string().min(2).max(60).optional(),
-  description: z.string().max(140).optional(),
-}).strict();
+const screenshotGroupUpdateSchema = z
+  .object({
+    title: z.string().min(2).max(60).optional(),
+    description: z.string().max(140).optional(),
+  })
+  .strict();
 
-const screenshotAssignGroupSchema = z.object({
-  groupKey: z.string().max(32).optional().default(""), // "" => ungroup
-}).strict();
+const screenshotAssignGroupSchema = z
+  .object({
+    groupKey: z.string().max(32).optional().default(""), // "" => ungroup
+  })
+  .strict();
 
-const createAppSchema = z.object({
-  name: z.string().min(2),
-  // slug: z.string().min(2), // for now user provides; later you auto-slugify
-  shortDescription: z.string().optional(),
-  platform: z.array(z.enum(["ANDROID", "IOS"])).optional(),
-}).strict();
+const createAppSchema = z
+  .object({
+    name: z.string().min(2),
+    // slug: z.string().min(2), // for now user provides; later you auto-slugify
+    shortDescription: z.string().optional(),
+    platform: z.array(z.enum(["ANDROID", "IOS"])).optional(),
+  })
+  .strict();
 
 function isAllowedCloudinaryUrl(url: string) {
   try {
@@ -63,116 +80,144 @@ function isAllowedCloudinaryUrl(url: string) {
   }
 }
 
-const screenshotSchema = z.object({
-  url: z.string().url(),
-  publicId: z.string().min(1).max(300),
-  fileHash: z.string().regex(/^[a-f0-9]{64}$/),
-  width: z.number().int().positive().max(5000),
-  height: z.number().int().positive().max(5000),
-}).strict();
+const screenshotSchema = z
+  .object({
+    url: z.string().url(),
+    publicId: z.string().min(1).max(300),
+    fileHash: z.string().regex(/^[a-f0-9]{64}$/),
+    width: z.number().int().positive().max(5000),
+    height: z.number().int().positive().max(5000),
+  })
+  .strict();
 
-const reorderSchema = z.object({
-  screenshotIds: z.array(z.string().min(1)).min(1),
-}).strict();
+const reorderSchema = z
+  .object({
+    screenshotIds: z.array(z.string().min(1)).min(1),
+  })
+  .strict();
 
-const stepCreateSchema = z.object({
-  title: z.string().min(2).max(80),
-  description: z.string().max(500).optional(),
-  imageUrl: z.string().url().optional(),
-  tags: z.array(z.string().min(1).max(20)).optional(),
-}).strict();
+const stepCreateSchema = z
+  .object({
+    title: z.string().min(2).max(80),
+    description: z.string().max(500).optional(),
+    imageUrl: z.string().url().optional(),
+    tags: z.array(z.string().min(1).max(20)).optional(),
+  })
+  .strict();
 
 const stepUpdateSchema = stepCreateSchema.partial();
 
-const reorderStepsSchema = z.object({
-  stepIds: z.array(z.string().min(1)).min(1),
-}).strict();
+const reorderStepsSchema = z
+  .object({
+    stepIds: z.array(z.string().min(1)).min(1),
+  })
+  .strict();
 
-const updateScreenshotSchema = z.object({
-  url: z.string().url().optional(),
-  width: z.number().optional(),
-  height: z.number().optional(),
-  groupKey: z.string().max(32).optional(),
-}).strict();
+const updateScreenshotSchema = z
+  .object({
+    url: z.string().url().optional(),
+    width: z.number().optional(),
+    height: z.number().optional(),
+    groupKey: z.string().max(32).optional(),
+  })
+  .strict();
 
-const appHeroSchema = z.object({
-  name: z.string().trim().min(2).max(80).optional(),
-  platform: z
-    .array(z.enum(["ANDROID", "IOS", "WINDOWS"]))
-    .min(1)
-    .max(3)
-    .optional(),
-  appIconUrl: z.string().url().optional().or(z.literal("")),
-}).strict();
+const appHeroSchema = z
+  .object({
+    name: z.string().trim().min(2).max(80).optional(),
+    platform: z
+      .array(z.enum(["ANDROID", "IOS", "WINDOWS"]))
+      .min(1)
+      .max(3)
+      .optional(),
+    appIconUrl: z.string().url().optional().or(z.literal("")),
+  })
+  .strict();
 
-const appOverviewSchema = z.object({
-  bullets: z
-    .array(z.string().trim().min(2).max(120))
-    .min(3, "Add at least 3 bullet points")
-    .max(5, "Maximum 5 bullet points"),
-}).strict();
+const appOverviewSchema = z
+  .object({
+    bullets: z
+      .array(z.string().trim().min(2).max(120))
+      .min(3, "Add at least 3 bullet points")
+      .max(5, "Maximum 5 bullet points"),
+  })
+  .strict();
 
-const challengesSchema = z.object({
-  intro: z.string().trim().max(600).optional().or(z.literal("")),
-  bullets: z
-    .array(z.string().trim().min(2).max(160))
-    .min(2, "Add at least 2 bullet points")
-    .max(8, "Maximum 8 bullet points"),
-}).strict();
+const challengesSchema = z
+  .object({
+    intro: z.string().trim().max(600).optional().or(z.literal("")),
+    bullets: z
+      .array(z.string().trim().min(2).max(160))
+      .min(2, "Add at least 2 bullet points")
+      .max(8, "Maximum 8 bullet points"),
+  })
+  .strict();
 
-const architectureDiagramSchema = z.object({
-  nodes: z.array(z.any()),
-  edges: z.array(z.any()),
-  viewport: z
-    .object({
-      x: z.number(),
-      y: z.number(),
-      zoom: z.number(),
-    })
-    .optional(),
-}).strict();
+const architectureDiagramSchema = z
+  .object({
+    nodes: z.array(z.any()),
+    edges: z.array(z.any()),
+    viewport: z
+      .object({
+        x: z.number(),
+        y: z.number(),
+        zoom: z.number(),
+      })
+      .optional(),
+  })
+  .strict();
 
-const architectureDiagramImageSchema = z.object({
-  imageUrl: z.string().url(),
-}).strict();
+const architectureDiagramImageSchema = z
+  .object({
+    imageUrl: z.string().url(),
+  })
+  .strict();
 
-const userFlowDiagramSchema = z.object({
-  version: z.number().optional(),
-  nodes: z.array(z.any()).default([]),
-  edges: z.array(z.any()).default([]),
-  viewport: z
-    .object({
-      x: z.number(),
-      y: z.number(),
-      zoom: z.number(),
-    })
-    .optional(),
-}).strict();
+const userFlowDiagramSchema = z
+  .object({
+    version: z.number().optional(),
+    nodes: z.array(z.any()).default([]),
+    edges: z.array(z.any()).default([]),
+    viewport: z
+      .object({
+        x: z.number(),
+        y: z.number(),
+        zoom: z.number(),
+      })
+      .optional(),
+  })
+  .strict();
 
-const userFlowTextSchema = z.object({
-  mode: z.enum(["TEXT", "DIAGRAM", "BOTH"]).default("BOTH"),
-  bullets: z.array(z.string().min(1)).max(20).default([]),
-}).strict();
+const userFlowTextSchema = z
+  .object({
+    mode: z.enum(["TEXT", "DIAGRAM", "BOTH"]).default("BOTH"),
+    bullets: z.array(z.string().min(1)).max(20).default([]),
+  })
+  .strict();
 
-const techStackSchema = z.object({
-  frontend: z.array(z.string()).default([]),
-  backend: z.array(z.string()).default([]),
-  database: z.array(z.string()).default([]),
-  infra: z.array(z.string()).default([]),
-}).strict();
+const techStackSchema = z
+  .object({
+    frontend: z.array(z.string()).default([]),
+    backend: z.array(z.string()).default([]),
+    database: z.array(z.string()).default([]),
+    infra: z.array(z.string()).default([]),
+  })
+  .strict();
 
-const integrationsSchema = z.object({
-  intro: z.string().max(300).optional().default(""),
-  items: z
-    .array(
-      z.object({
-        key: z.string().min(1).max(40),
-        value: z.string().min(1).max(80),
-      }),
-    )
-    .max(12)
-    .default([]),
-}).strict();
+const integrationsSchema = z
+  .object({
+    intro: z.string().max(300).optional().default(""),
+    items: z
+      .array(
+        z.object({
+          key: z.string().min(1).max(40),
+          value: z.string().min(1).max(80),
+        }),
+      )
+      .max(12)
+      .default([]),
+  })
+  .strict();
 
 // const iconRefSchema = z.object({
 //   id: z.string().min(1),
@@ -220,13 +265,15 @@ const stepSchema = z
       ctx.addIssue({ code: "custom", message: "ARROW requires text" });
   });
 
-const flowSchema = z.object({
-  id: z.string().min(1),
-  title: z.string().min(1),
-  icon: z.string().optional(),
-  order: z.number().int().min(0),
-  steps: z.array(stepSchema).default([]),
-}).strict();
+const flowSchema = z
+  .object({
+    id: z.string().min(1),
+    title: z.string().min(1),
+    icon: z.string().optional(),
+    order: z.number().int().min(0),
+    steps: z.array(stepSchema).default([]),
+  })
+  .strict();
 
 function slugify(s: string) {
   return String(s || "")
@@ -245,58 +292,70 @@ function uniqueKey(base: string, existing: Set<string>) {
   return `${base}-${Date.now()}`;
 }
 
-export const userFlowWalkthroughsSchema = z.object({
-  intro: z.string().optional(),
-  flows: z.array(flowSchema).max(12).default([]),
-}).strict();
+export const userFlowWalkthroughsSchema = z
+  .object({
+    intro: z.string().optional(),
+    flows: z.array(flowSchema).max(12).default([]),
+  })
+  .strict();
 
 export default async function appsRoutes(app: any) {
   // List my apps
-  app.get("/", {
-    preHandler: app.requireAuth,
-    bodyLimit: 100 * 1024,
-    config: {
-      rateLimit: {
-        max: 60,
-        timeWindow: "1 minute",
+  app.get(
+    "/",
+    {
+      preHandler: app.requireAuth,
+      bodyLimit: 100 * 1024,
+      config: {
+        rateLimit: {
+          max: 60,
+          timeWindow: "1 minute",
+        },
       },
     },
-  }, async (req: any) => {
-    const clerkUserId = req.auth.clerkUserId;
+    async (req: any, reply: any) => {
+      const clerkUserId = req.auth.clerkUserId;
 
-    const user = await UserModel.findOne({ clerkUserId }).lean();
-    if (!user) return { apps: [] };
+      // const user = await UserModel.findOne({ clerkUserId }).lean();
+      const user = (await UserModel.findOne({
+        clerkUserId,
+      }).lean()) as LeanUser | null;
 
-    const apps = await AppModel.find({ userId: user?._id })
-      .sort({ createdAt: -1 })
-      .lean();
+      if (!user) {
+        return reply.code(404).send({ message: "User not found" });
+      }
 
-    return { user, apps };
-    // return {
-    //   user:{
-    //     id: user._id,
-    //     username: user.username,
-    //     displayName: user.displayName,
-    //     plan: user.plan,
-    //     planStatus: user.planStatus
-    //   },
-    //   apps
-    // }
-  });
+      const apps = await AppModel.findOne({ userId: user?._id })
+        .sort({ createdAt: -1 })
+        .lean();
+
+      return { user, apps };
+      // return {
+      //   user:{
+      //     id: user._id,
+      //     username: user.username,
+      //     displayName: user.displayName,
+      //     plan: user.plan,
+      //     planStatus: user.planStatus
+      //   },
+      //   apps
+      // }
+    },
+  );
 
   // Create app (auto-creates user if missing)
   app.post(
     "/",
     {
-    preHandler: app.requireAuth,
-    bodyLimit: 100 * 1024,
-    config: {
-      rateLimit: {
-        max: 10,
-        timeWindow: "1 minute",
+      preHandler: app.requireAuth,
+      bodyLimit: 100 * 1024,
+      config: {
+        rateLimit: {
+          max: 10,
+          timeWindow: "1 minute",
+        },
       },
     },
-  },
     async (req: any, reply: any) => {
       const clerkUserId = req.auth.clerkUserId;
       const parsed = createAppSchema.safeParse(req.body);
@@ -337,17 +396,16 @@ export default async function appsRoutes(app: any) {
   app.post(
     "/:appId/screenshots",
     {
-    preHandler: app.requireAuth,
-    bodyLimit: 500 * 1024,
-    config: {
-      rateLimit: {
-        max: 20,
-        timeWindow: "1 minute",
+      preHandler: app.requireAuth,
+      bodyLimit: 500 * 1024,
+      config: {
+        rateLimit: {
+          max: 20,
+          timeWindow: "1 minute",
+        },
       },
     },
-  },
     async (req: any, reply: any) => {
-      
       const parsed = screenshotSchema.safeParse(req.body);
       if (!parsed.success) return reply.code(400).send(parsed.error.flatten());
       if (!isAllowedCloudinaryUrl(parsed.data.url)) {
@@ -365,7 +423,6 @@ export default async function appsRoutes(app: any) {
       });
 
       if (!appDoc) return reply.code(404).send({ message: "App not found" });
-      // ✅ LIMIT ENFORCEMENT
       if (appDoc.screenshots.length >= limit) {
         return reply.code(403).send({
           code: "SCREENSHOT_LIMIT_REACHED",
@@ -397,30 +454,44 @@ export default async function appsRoutes(app: any) {
   app.get(
     "/:appId",
     {
-    preHandler: app.requireAuth,
-    bodyLimit: 100 * 1024,
-    config: {
-      rateLimit: {
-        max: 60,
-        timeWindow: "1 minute",
+      preHandler: app.requireAuth,
+      bodyLimit: 100 * 1024,
+      config: {
+        rateLimit: {
+          max: 60,
+          timeWindow: "1 minute",
+        },
       },
     },
-  },
     async (req: any, reply: any) => {
       const clerkUserId = req.auth.clerkUserId;
 
-      const user = await UserModel.findOne({ clerkUserId }).lean();
+      // const user = await UserModel.findOne({ clerkUserId }).lean();
+      const user = (await UserModel.findOne({
+        clerkUserId,
+      }).lean()) as LeanUser | null;
+
       if (!user) return reply.code(401).send({ message: "Unauthorized" });
 
-      const appDoc = await AppModel.findOne({
+      type LeanAppWithScreenshots = {
+        _id: Types.ObjectId;
+        screenshots?: any[];
+      };
+
+      // const appDoc = await AppModel.findOne({
+      //   _id: new Types.ObjectId(req.params.appId),
+      //   userId: user._id,
+      // }).lean();
+
+      const appDoc = (await AppModel.findOne({
         _id: new Types.ObjectId(req.params.appId),
         userId: user._id,
-      }).lean();
+      }).lean()) as LeanAppWithScreenshots | null;
+
+      if (!appDoc) return reply.code(404).send({ message: "App not found" });
 
       const screenshotLimit = getScreenshotLimit(user.plan);
       const screenshotsUsed = appDoc?.screenshots?.length || 0;
-
-      if (!appDoc) return reply.code(404).send({ message: "App not found" });
 
       return {
         app: appDoc,
@@ -437,15 +508,15 @@ export default async function appsRoutes(app: any) {
   app.patch(
     "/:appId/screenshots/reorder",
     {
-    preHandler: app.requireAuth,
-    bodyLimit: 100 * 1024,
-    config: {
-      rateLimit: {
-        max: 35,
-        timeWindow: "1 minute",
+      preHandler: app.requireAuth,
+      bodyLimit: 100 * 1024,
+      config: {
+        rateLimit: {
+          max: 35,
+          timeWindow: "1 minute",
+        },
       },
     },
-  },
     async (req: any, reply: any) => {
       const parsed = reorderSchema.safeParse(req.body);
       if (!parsed.success) return reply.code(400).send(parsed.error.flatten());
@@ -525,15 +596,15 @@ export default async function appsRoutes(app: any) {
   app.post(
     "/:appId/walkthrough",
     {
-    preHandler: app.requireAuth,
-    bodyLimit: 100 * 1024,
-    config: {
-      rateLimit: {
-        max: 20,
-        timeWindow: "1 minute",
+      preHandler: app.requireAuth,
+      bodyLimit: 100 * 1024,
+      config: {
+        rateLimit: {
+          max: 20,
+          timeWindow: "1 minute",
+        },
       },
     },
-  },
     async (req: any, reply: any) => {
       const parsed = stepCreateSchema.safeParse(req.body);
       if (!parsed.success) return reply.code(400).send(parsed.error.flatten());
@@ -541,7 +612,7 @@ export default async function appsRoutes(app: any) {
       const owned = await getOwnedApp(req, reply);
       if (!owned) return;
 
-      const { user, appDoc } = owned
+      const { user, appDoc } = owned;
 
       const order = appDoc.walkthrough.length + 1;
 
@@ -564,15 +635,15 @@ export default async function appsRoutes(app: any) {
   app.patch(
     "/:appId/walkthrough/:stepId",
     {
-    preHandler: app.requireAuth,
-    bodyLimit: 100 * 1024,
-    config: {
-      rateLimit: {
-        max: 35,
-        timeWindow: "1 minute",
+      preHandler: app.requireAuth,
+      bodyLimit: 100 * 1024,
+      config: {
+        rateLimit: {
+          max: 35,
+          timeWindow: "1 minute",
+        },
       },
     },
-  },
     async (req: any, reply: any) => {
       const parsed = stepUpdateSchema.safeParse(req.body);
       if (!parsed.success) return reply.code(400).send(parsed.error.flatten());
@@ -601,20 +672,20 @@ export default async function appsRoutes(app: any) {
   app.delete(
     "/:appId/walkthrough/:stepId",
     {
-    preHandler: app.requireAuth,
-    bodyLimit: 100 * 1024,
-    config: {
-      rateLimit: {
-        max: 20,
-        timeWindow: "1 minute",
+      preHandler: app.requireAuth,
+      bodyLimit: 100 * 1024,
+      config: {
+        rateLimit: {
+          max: 20,
+          timeWindow: "1 minute",
+        },
       },
     },
-  },
     async (req: any, reply: any) => {
       const owned = await getOwnedApp(req, reply);
 
       if (!owned) return;
-      const { user, appDoc } = owned
+      const { user, appDoc } = owned;
 
       const step = appDoc.walkthrough.id(req.params.stepId);
       if (!step) return reply.code(404).send({ message: "Step not found" });
@@ -635,24 +706,24 @@ export default async function appsRoutes(app: any) {
   app.patch(
     "/:appId/walkthrough/reorder",
     {
-    preHandler: app.requireAuth,
-    bodyLimit: 100 * 1024,
-    config: {
-      rateLimit: {
-        max: 20,
-        timeWindow: "1 minute",
+      preHandler: app.requireAuth,
+      bodyLimit: 100 * 1024,
+      config: {
+        rateLimit: {
+          max: 20,
+          timeWindow: "1 minute",
+        },
       },
     },
-  },
     async (req: any, reply: any) => {
       const parsed = reorderStepsSchema.safeParse(req.body);
       if (!parsed.success) return reply.code(400).send(parsed.error.flatten());
 
-      const  owned = await getOwnedApp(req, reply);
+      const owned = await getOwnedApp(req, reply);
 
       if (!owned) return;
 
-      const { user, appDoc } = owned
+      const { user, appDoc } = owned;
 
       const currentIds = new Set(
         appDoc.walkthrough.map((s: any) => String(s._id)),
@@ -684,21 +755,21 @@ export default async function appsRoutes(app: any) {
   app.post(
     "/:appId/generate-cover",
     {
-    preHandler: app.requireAuth,
-    bodyLimit: 500 * 1024,
-    config: {
-      rateLimit: {
-        max: 20,
-        timeWindow: "1 minute",
+      preHandler: app.requireAuth,
+      bodyLimit: 500 * 1024,
+      config: {
+        rateLimit: {
+          max: 20,
+          timeWindow: "1 minute",
+        },
       },
     },
-  },
     async (req: any, reply: any) => {
       const owned = await getOwnedApp(req, reply);
 
       if (!owned) return;
 
-      const { appDoc } = owned
+      const { appDoc } = owned;
 
       const user = await UserModel.findById(appDoc.userId);
       if (!user) return reply.code(404).send({ message: "User not found" });
@@ -737,17 +808,16 @@ export default async function appsRoutes(app: any) {
   app.patch(
     "/:appId/screenshots/:screenshotId",
     {
-    preHandler: app.requireAuth,
-    bodyLimit: 500 * 1024,
-    config: {
-      rateLimit: {
-        max: 30,
-        timeWindow: "1 minute",
+      preHandler: app.requireAuth,
+      bodyLimit: 500 * 1024,
+      config: {
+        rateLimit: {
+          max: 30,
+          timeWindow: "1 minute",
+        },
       },
     },
-  },
     async (req: any, reply: any) => {
-      
       const parsed = updateScreenshotSchema.safeParse(req.body);
       if (!parsed.success) return reply.code(400).send(parsed.error.flatten());
 
@@ -761,10 +831,10 @@ export default async function appsRoutes(app: any) {
       });
 
       if (!appDoc) return reply.code(404).send({ message: "App not found" });
-      
 
       const shot = appDoc.screenshots.id(req.params.screenshotId);
-      if (!shot) return reply.code(404).send({ message: "Screenshot not found" });
+      if (!shot)
+        return reply.code(404).send({ message: "Screenshot not found" });
       //Check if the user is a pro-user
       if (parsed.data.groupKey !== undefined) {
         if (!requirePro(user, reply)) return;
@@ -777,7 +847,7 @@ export default async function appsRoutes(app: any) {
 
         // validate group exists when assigning (unless ungroup "")
         const key = parsed.data.groupKey.trim();
-        
+
         if (key !== "") {
           const exists = appDoc.screenshotGroups.some(
             (g: any) => g.key === key,
@@ -787,7 +857,6 @@ export default async function appsRoutes(app: any) {
         }
         shot.groupKey = key;
       }
-      
 
       if (parsed.data.url !== undefined) shot.url = parsed.data.url;
       if (parsed.data.width !== undefined) shot.width = parsed.data.width;
@@ -802,15 +871,15 @@ export default async function appsRoutes(app: any) {
   app.delete(
     "/:appId/screenshots/:screenshotId",
     {
-    preHandler: app.requireAuth,
-    bodyLimit: 500 * 1024,
-    config: {
-      rateLimit: {
-        max: 20,
-        timeWindow: "1 minute",
+      preHandler: app.requireAuth,
+      bodyLimit: 500 * 1024,
+      config: {
+        rateLimit: {
+          max: 20,
+          timeWindow: "1 minute",
+        },
       },
     },
-  },
     async (req: any, reply: any) => {
       const clerkUserId = req.auth.clerkUserId;
       const user = await UserModel.findOne({ clerkUserId });
@@ -840,26 +909,29 @@ export default async function appsRoutes(app: any) {
         try {
           await cloudinary.uploader.destroy(publicId);
         } catch (err) {
-          req.log.error({ err, publicId }, "Failed to delete Cloudinary screenshot");
+          req.log.error(
+            { err, publicId },
+            "Failed to delete Cloudinary screenshot",
+          );
         }
         return { screenshots: appDoc.screenshots };
       }
-    }
+    },
   );
 
   //Add app hero section
   app.patch(
     "/:appId/hero",
     {
-    preHandler: app.requireAuth,
-    bodyLimit: 100 * 1024,
-    config: {
-      rateLimit: {
-        max: 20,
-        timeWindow: "1 minute",
+      preHandler: app.requireAuth,
+      bodyLimit: 100 * 1024,
+      config: {
+        rateLimit: {
+          max: 20,
+          timeWindow: "1 minute",
+        },
       },
     },
-  },
     async (req: any, reply: any) => {
       const parsed = appHeroSchema.safeParse(req.body);
       if (!parsed.success) return reply.code(400).send(parsed.error.flatten());
@@ -891,15 +963,15 @@ export default async function appsRoutes(app: any) {
   app.patch(
     "/:appId/overview",
     {
-    preHandler: app.requireAuth,
-    bodyLimit: 100 * 1024,
-    config: {
-      rateLimit: {
-        max: 20,
-        timeWindow: "1 minute",
+      preHandler: app.requireAuth,
+      bodyLimit: 100 * 1024,
+      config: {
+        rateLimit: {
+          max: 20,
+          timeWindow: "1 minute",
+        },
       },
     },
-  },
     async (req: any, reply: any) => {
       const parsed = appOverviewSchema.safeParse(req.body);
       if (!parsed.success) return reply.code(400).send(parsed.error.flatten());
@@ -929,15 +1001,15 @@ export default async function appsRoutes(app: any) {
   app.patch(
     "/:appId/challenges",
     {
-    preHandler: app.requireAuth,
-    bodyLimit: 100 * 1024,
-    config: {
-      rateLimit: {
-        max: 20,
-        timeWindow: "1 minute",
+      preHandler: app.requireAuth,
+      bodyLimit: 100 * 1024,
+      config: {
+        rateLimit: {
+          max: 20,
+          timeWindow: "1 minute",
+        },
       },
     },
-  },
     async (req: any, reply: any) => {
       const parsed = challengesSchema.safeParse(req.body);
       if (!parsed.success) return reply.code(400).send(parsed.error.flatten());
@@ -972,15 +1044,15 @@ export default async function appsRoutes(app: any) {
   app.patch(
     "/:appId/architecture-diagram",
     {
-    preHandler: app.requireAuth,
-    bodyLimit: 500 * 1024,
-    config: {
-      rateLimit: {
-        max: 20,
-        timeWindow: "1 minute",
+      preHandler: app.requireAuth,
+      bodyLimit: 500 * 1024,
+      config: {
+        rateLimit: {
+          max: 20,
+          timeWindow: "1 minute",
+        },
       },
     },
-  },
     async (req: any, reply: any) => {
       const parsed = architectureDiagramSchema.safeParse(req.body);
       if (!parsed.success) return reply.code(400).send(parsed.error.flatten());
@@ -1012,15 +1084,15 @@ export default async function appsRoutes(app: any) {
   app.patch(
     "/:appId/architecture-diagram/image",
     {
-    preHandler: app.requireAuth,
-    bodyLimit: 500 * 1024,
-    config: {
-      rateLimit: {
-        max: 20,
-        timeWindow: "1 minute",
+      preHandler: app.requireAuth,
+      bodyLimit: 500 * 1024,
+      config: {
+        rateLimit: {
+          max: 20,
+          timeWindow: "1 minute",
+        },
       },
     },
-  },
     async (req: any, reply: any) => {
       const parsed = architectureDiagramImageSchema.safeParse(req.body);
       if (!parsed.success) return reply.code(400).send(parsed.error.flatten());
@@ -1046,15 +1118,15 @@ export default async function appsRoutes(app: any) {
   app.patch(
     "/:appId/user-flow-diagram",
     {
-    preHandler: app.requireAuth,
-    bodyLimit: 500 * 1024,
-    config: {
-      rateLimit: {
-        max: 20,
-        timeWindow: "1 minute",
+      preHandler: app.requireAuth,
+      bodyLimit: 500 * 1024,
+      config: {
+        rateLimit: {
+          max: 20,
+          timeWindow: "1 minute",
+        },
       },
     },
-  },
     async (req: any, reply: any) => {
       const parsed = userFlowDiagramSchema.safeParse(req.body);
       if (!parsed.success) return reply.code(400).send(parsed.error.flatten());
@@ -1085,15 +1157,15 @@ export default async function appsRoutes(app: any) {
   app.patch(
     "/:appId/user-flow-diagram/image",
     {
-    preHandler: app.requireAuth,
-    bodyLimit: 100 * 1024,
-    config: {
-      rateLimit: {
-        max: 20,
-        timeWindow: "1 minute",
+      preHandler: app.requireAuth,
+      bodyLimit: 100 * 1024,
+      config: {
+        rateLimit: {
+          max: 20,
+          timeWindow: "1 minute",
+        },
       },
     },
-  },
     async (req: any, reply: any) => {
       const parsed = z
         .object({ imageUrl: z.string().url() })
@@ -1124,15 +1196,15 @@ export default async function appsRoutes(app: any) {
   app.patch(
     "/:appId/user-flow-text",
     {
-    preHandler: app.requireAuth,
-    bodyLimit: 100 * 1024,
-    config: {
-      rateLimit: {
-        max: 20,
-        timeWindow: "1 minute",
+      preHandler: app.requireAuth,
+      bodyLimit: 100 * 1024,
+      config: {
+        rateLimit: {
+          max: 20,
+          timeWindow: "1 minute",
+        },
       },
     },
-  },
     async (req: any, reply: any) => {
       const parsed = userFlowTextSchema.safeParse(req.body);
       if (!parsed.success) return reply.code(400).send(parsed.error.flatten());
@@ -1161,15 +1233,15 @@ export default async function appsRoutes(app: any) {
   app.patch(
     "/:appId/tech-stack",
     {
-    preHandler: app.requireAuth,
-    bodyLimit: 500 * 1024,
-    config: {
-      rateLimit: {
-        max: 20,
-        timeWindow: "1 minute",
+      preHandler: app.requireAuth,
+      bodyLimit: 500 * 1024,
+      config: {
+        rateLimit: {
+          max: 20,
+          timeWindow: "1 minute",
+        },
       },
     },
-  },
     async (req: any, reply: any) => {
       const parsed = techStackSchema.safeParse(req.body);
       if (!parsed.success) return reply.code(400).send(parsed.error.flatten());
@@ -1200,15 +1272,15 @@ export default async function appsRoutes(app: any) {
   app.patch(
     "/:appId/integrations",
     {
-    preHandler: app.requireAuth,
-    bodyLimit: 100 * 1024,
-    config: {
-      rateLimit: {
-        max: 20,
-        timeWindow: "1 minute",
+      preHandler: app.requireAuth,
+      bodyLimit: 100 * 1024,
+      config: {
+        rateLimit: {
+          max: 20,
+          timeWindow: "1 minute",
+        },
       },
     },
-  },
     async (req: any, reply: any) => {
       const parsed = integrationsSchema.safeParse(req.body);
       if (!parsed.success) return reply.code(400).send(parsed.error.flatten());
@@ -1251,15 +1323,15 @@ export default async function appsRoutes(app: any) {
   app.patch(
     "/:appId/user-flow-walkthroughs",
     {
-    preHandler: app.requireAuth,
-    bodyLimit: 500 * 1024,
-    config: {
-      rateLimit: {
-        max: 20,
-        timeWindow: "1 minute",
+      preHandler: app.requireAuth,
+      bodyLimit: 500 * 1024,
+      config: {
+        rateLimit: {
+          max: 20,
+          timeWindow: "1 minute",
+        },
       },
     },
-  },
     async (req: any, reply: any) => {
       const parsed = userFlowWalkthroughsSchema.safeParse(req.body);
       if (!parsed.success) return reply.code(400).send(parsed.error.flatten());
@@ -1287,15 +1359,15 @@ export default async function appsRoutes(app: any) {
   app.post(
     "/:appId/screenshot-groups",
     {
-    preHandler: app.requireAuth,
-    bodyLimit: 500 * 1024,
-    config: {
-      rateLimit: {
-        max: 20,
-        timeWindow: "1 minute",
+      preHandler: app.requireAuth,
+      bodyLimit: 500 * 1024,
+      config: {
+        rateLimit: {
+          max: 20,
+          timeWindow: "1 minute",
+        },
       },
     },
-  },
     async (req: any, reply: any) => {
       const parsed = screenshotGroupCreateSchema.safeParse(req.body);
       if (!parsed.success) return reply.code(400).send(parsed.error.flatten());
@@ -1328,15 +1400,15 @@ export default async function appsRoutes(app: any) {
   app.patch(
     "/:appId/screenshot-groups/:groupKey",
     {
-    preHandler: app.requireAuth,
-    bodyLimit: 100 * 1024,
-    config: {
-      rateLimit: {
-        max: 20,
-        timeWindow: "1 minute",
+      preHandler: app.requireAuth,
+      bodyLimit: 100 * 1024,
+      config: {
+        rateLimit: {
+          max: 20,
+          timeWindow: "1 minute",
+        },
       },
     },
-  },
     async (req: any, reply: any) => {
       const parsed = screenshotGroupUpdateSchema.safeParse(req.body);
       if (!parsed.success) return reply.code(400).send(parsed.error.flatten());
@@ -1370,15 +1442,15 @@ export default async function appsRoutes(app: any) {
   app.delete(
     "/:appId/screenshot-groups/:groupKey",
     {
-    preHandler: app.requireAuth,
-    bodyLimit: 100 * 1024,
-    config: {
-      rateLimit: {
-        max: 20,
-        timeWindow: "1 minute",
+      preHandler: app.requireAuth,
+      bodyLimit: 100 * 1024,
+      config: {
+        rateLimit: {
+          max: 20,
+          timeWindow: "1 minute",
+        },
       },
     },
-  },
     async (req: any, reply: any) => {
       const user = await UserModel.findOne({
         clerkUserId: req.auth.clerkUserId,

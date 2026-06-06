@@ -2,6 +2,15 @@ import { z } from "zod";
 import { onboardUser, getUserByClerkId } from "../services/users.service.js";
 import { normalizeUsername } from "../utils/username.js";
 
+type LeanUser = {
+  _id: unknown;
+  clerkUserId: string;
+  username?: string;
+  displayName?: string;
+  email?: string;
+  plan?: "FREE" | "PRO";
+};
+
 const onboardSchema = z.object({
   username: z.string().min(3).max(20),
   displayName: z.string().optional(),
@@ -15,9 +24,8 @@ export default async function usersRoutes(app: any) {
     { preHandler: app.requireAuth },
     async (req: any, reply: any) => {
       const clerkUserId = req.auth.clerkUserId;
-      console.log("Checking user onboarding for:", clerkUserId);
-      const user = await getUserByClerkId(clerkUserId);
-      console.log("User found:", user ? user._id : "No user");
+      // const user = await getUserByClerkId(clerkUserId);
+      const user = (await getUserByClerkId(clerkUserId)) as LeanUser | null;
       if (!user) {
         return reply.send({ onboarded: false });
       }
@@ -35,7 +43,6 @@ export default async function usersRoutes(app: any) {
       if (!parsed.success) {
         return reply.code(400).send(parsed.error.flatten());
       }
-      console.log("Request:",req.body)
       const clerkUserId = req.auth.clerkUserId;
       // const email =
       //   req.headers["x-user-email"]?.toString() || "";
