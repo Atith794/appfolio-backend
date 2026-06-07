@@ -1,6 +1,6 @@
-import { UserModel } from "../models/user.model";
-import { AppModel } from "../models/app.model";
-import { effectivePlan } from "../lib/entitlements";
+import { UserModel } from "../models/user.model.js";
+import { AppModel } from "../models/app.model.js";
+import { effectivePlan } from "../lib/entitlements.js";
 import { Types } from "mongoose";
 
 type LeanPublicUser = {
@@ -42,7 +42,7 @@ function sanitizePublicApp(appDoc: any, plan: string) {
     updatedAt: appDoc.updatedAt,
   };
 
-  // FREE: hide public grouping (optional)
+  // FREE: hide public grouping
   if (!isPro) {
     safeApp.screenshotGroups = [];
     safeApp.screenshots = (safeApp.screenshots || []).map((s: any) => ({ ...s, groupKey: "" }));
