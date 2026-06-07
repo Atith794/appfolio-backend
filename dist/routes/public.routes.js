@@ -1,6 +1,6 @@
-import { UserModel } from "../models/user.model";
-import { AppModel } from "../models/app.model";
-import { effectivePlan } from "../lib/entitlements";
+import { UserModel } from "../models/user.model.js";
+import { AppModel } from "../models/app.model.js";
+import { effectivePlan } from "../lib/entitlements.js";
 function sanitizePublicApp(appDoc, plan) {
     const isPro = plan === "PRO";
     const safeApp = {

@@ -9,25 +9,7 @@ const SignatureBodySchema = z.object({
     appId: z.string().min(1).max(100),
     fileHash: z.string().regex(/^[a-f0-9]{64}$/),
 });
-// V1 working version
-// export default async function uploadsRoutes(app: any) {
-//   app.post(
-//     "/cloudinary-signature",
-//     { preHandler: app.requireAuth },
-//     async (req: any) => {
-//       const timestamp = Math.floor(Date.now() / 1000);
-//       const folder = "appfolio/screenshots";
-//       const payload = `folder=${folder}&timestamp=${timestamp}${process.env.CLOUDINARY_API_SECRET}`;
-//       const signature = crypto.createHash("sha1").update(payload).digest("hex");
-//       return {
-//         timestamp,
-//         folder,
-//         signature,
-//         apiKey: process.env.CLOUDINARY_API_KEY,
-//       };
-//     },
-//   );
-// }
+
 export default async function uploadsRoutes(app) {
     app.post("/cloudinary-signature", {
         preHandler: app.requireAuth,

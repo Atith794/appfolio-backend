@@ -1,6 +1,6 @@
 import { z } from "zod";
-import { UserModel } from "../models/user.model";
-import { AppModel } from "../models/app.model";
+import { UserModel } from "../models/user.model.js";
+import { AppModel } from "../models/app.model.js";
 import { Types } from "mongoose";
 import axios from "axios";
 import { generateCover } from "../utils/generateCover.js";
