@@ -38,8 +38,7 @@ export default async function uploadsRoutes(app: any) {
 
       const { appId, fileHash } = parsed.data;
 
-      const userId = req.user?.sub || req.user?.id;
-
+      const userId = req.auth?.clerkUserId || null;
       if (!userId) {
         return reply.code(401).send({
           message: "Unauthorized",

@@ -4,7 +4,6 @@ import mongoose from "mongoose";
 export default fp(
   async function mongo(app) {
     const uri = process.env.MONGODB_URI;
-console.log("Mongo URI exists:", process.env.MONGODB_URI);
     if (!uri) {
       throw new Error("MONGODB_URI is missing");
     }

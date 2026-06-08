@@ -325,7 +325,7 @@ export default async function appsRoutes(app: any) {
         return reply.code(404).send({ message: "User not found" });
       }
 
-      const apps = await AppModel.findOne({ userId: user?._id })
+      const apps = await AppModel.find({ userId: user?._id })
         .sort({ createdAt: -1 })
         .lean();
 
