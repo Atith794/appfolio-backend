@@ -47,8 +47,7 @@ export function resolvePricingFromRequest(req: FastifyRequest): ResolvedPricing 
 
   const trustedCountry =
     normalizeCountry(headers["x-vercel-ip-country"]) ||
-    normalizeCountry(headers["cf-ipcountry"]) ||
-    normalizeCountry(headers["x-country-code"]);
+    normalizeCountry(headers["cf-ipcountry"])
 
   const country = trustedCountry || "US";
   const region = getRegionFromCountry(country);

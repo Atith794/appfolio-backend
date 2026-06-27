@@ -14,6 +14,7 @@ import appsRoutes from "./routes/apps.routes.js";
 import usersRoutes from "./routes/users.routes.js";
 import uploadsRoutes from "./routes/uploads.routes.js";
 import { billingRoutes } from "./routes/billing.routes.js";
+import { paymentsRoutes } from "./routes/payments.routes.js";
 import helmet from "@fastify/helmet";
 
 function getAllowedOrigins() {
@@ -26,7 +27,7 @@ function getAllowedOrigins() {
 
   return [
     "http://localhost:3000",
-    "https://rg8xle3mbdnb.shares.zrok.io",
+    "http://127.0.0.1:3000",
   ];
 }
 
@@ -91,7 +92,7 @@ export async function buildApp() {
    */
   await app.register(rateLimit, {
     max: 100,
-    timeWindow: "1 minute",
+    timeWindow: "5 minute",
     errorResponseBuilder: () => {
       return {
         message: "Too many requests. Please try again later.",
@@ -128,6 +129,7 @@ export async function buildApp() {
   await app.register(appsRoutes, { prefix: "/apps" });
   await app.register(uploadsRoutes, { prefix: "/uploads" });
   await app.register(billingRoutes, { prefix: "/billing" });
+  await app.register(paymentsRoutes, { prefix: "/api" });
 
   /**
    * 404 handler

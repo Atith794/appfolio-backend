@@ -12,6 +12,7 @@ import appsRoutes from "./routes/apps.routes.js";
 import usersRoutes from "./routes/users.routes.js";
 import uploadsRoutes from "./routes/uploads.routes.js";
 import { billingRoutes } from "./routes/billing.routes.js";
+import { paymentsRoutes } from "./routes/payments.routes.js";
 import helmet from "@fastify/helmet";
 function getAllowedOrigins() {
     if (process.env.NODE_ENV === "production") {
@@ -110,6 +111,7 @@ export async function buildApp() {
     await app.register(appsRoutes, { prefix: "/apps" });
     await app.register(uploadsRoutes, { prefix: "/uploads" });
     await app.register(billingRoutes, { prefix: "/billing" });
+    await app.register(paymentsRoutes, { prefix: "/api" });
     /**
      * 404 handler
      */
