@@ -215,14 +215,14 @@ function isStillWithinPaidPeriod(user: any) {
 
 function getRazorpayTotalCount(billing: Billing) {
   if (billing === "MONTHLY") {
-    return 100;
+    return 120;
   }
 
   if (billing === "YEARLY") {
     return 10;
   }
 
-  return 100;
+  return 1;
 }
 
 export async function billingRoutes(app: FastifyInstance) {
@@ -330,7 +330,12 @@ export async function billingRoutes(app: FastifyInstance) {
             });
           }
 
-          const planId = pricing.config.razorpayPlanIds[billing];
+          // const planId = pricing.config.razorpayPlanIds[billing];
+          const planId =
+            billing === "MONTHLY"
+              ? process.env.RAZORPAY_MONTHLY_PLAN_ID
+              : process.env.RAZORPAY_YEARLY_PLAN_ID;
+
           if (!planId) {
             return reply
               .code(500)
@@ -371,11 +376,7 @@ export async function billingRoutes(app: FastifyInstance) {
         }
       } catch (error: any) {
         req.log.error({ error }, "Billing checkout failed");
-        return (
-          reply
-            .code(500)
-            .send({ message: "Unable to create checkout" })
-        );
+        return reply.code(500).send({ message: "Unable to create checkout" });
       }
     },
   );
