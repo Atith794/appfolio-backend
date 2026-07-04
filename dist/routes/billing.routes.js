@@ -210,7 +210,6 @@ export async function billingRoutes(app) {
             });
         }
         const pricing = resolvePricingForUser(req, user);
-        console.log("Pricing provider:", pricing);
         try {
             if (pricing.provider === "razorpay") {
                 if (!("razorpayPlanIds" in pricing.config)) {
@@ -407,11 +406,7 @@ export async function billingRoutes(app) {
                     $or: [{ _id: notes.userId }, { clerkUserId: notes.clerkUserId }],
                 });
             }
-            console.log("RAZORPAY WEBHOOK USER FOUND:", {
-                found: Boolean(user),
-                subscriptionId,
-                notes: subscriptionEntity?.notes,
-            });
+            
             if (!user) {
                 return reply.send({ received: true, userFound: false });
             }

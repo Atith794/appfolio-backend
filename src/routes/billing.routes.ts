@@ -77,7 +77,7 @@ function isValidBilling(value: unknown): value is Billing {
 }
 
 function isBillingRegion(value: unknown): value is BillingRegion {
-  return value === "IN" || value === "UK" || value === "EU" || value === "ROW";
+  return value === "IN" || value === "UK" || value === "GBP" || value === "US";
 }
 
 function getClerkUserId(req: FastifyRequest): string | null {
@@ -225,6 +225,31 @@ function getRazorpayTotalCount(billing: Billing) {
   return 1;
 }
 
+function getRazorpayPlanId(params: { region: string; billing: Billing }) {
+  const { region, billing } = params;
+
+  const planMap: Record<string, Record<Billing, string | undefined>> = {
+    IN: {
+      MONTHLY: process.env.RAZORPAY_PLAN_IN_MONTHLY,
+      YEARLY: process.env.RAZORPAY_PLAN_IN_YEARLY,
+    },
+    GBP: {
+      MONTHLY: process.env.RAZORPAY_PLAN_GBP_MONTHLY,
+      YEARLY: process.env.RAZORPAY_PLAN_GBP_YEARLY,
+    },
+    UK: {
+      MONTHLY: process.env.RAZORPAY_PLAN_UK_MONTHLY,
+      YEARLY: process.env.RAZORPAY_PLAN_UK_YEARLY,
+    },
+    US: {
+      MONTHLY: process.env.RAZORPAY_PLAN_ROW_MONTHLY,
+      YEARLY: process.env.RAZORPAY_PLAN_ROW_YEARLY,
+    },
+  };
+
+  return planMap[region]?.[billing];
+}
+
 export async function billingRoutes(app: FastifyInstance) {
   if (!process.env.RAZORPAY_KEY_ID) {
     throw new Error("RAZORPAY_KEY_ID is missing");
@@ -254,7 +279,6 @@ export async function billingRoutes(app: FastifyInstance) {
     },
     async (req, reply) => {
       const pricing = resolvePricingFromRequest(req);
-
       return reply.send({
         country: pricing.country,
         region: pricing.region,
@@ -320,8 +344,6 @@ export async function billingRoutes(app: FastifyInstance) {
 
       const pricing = resolvePricingForUser(req, user);
 
-      console.log("Pricing provider:", pricing);
-
       try {
         if (pricing.provider === "razorpay") {
           if (!("razorpayPlanIds" in pricing.config)) {
@@ -330,11 +352,16 @@ export async function billingRoutes(app: FastifyInstance) {
             });
           }
 
-          // const planId = pricing.config.razorpayPlanIds[billing];
-          const planId =
-            billing === "MONTHLY"
-              ? process.env.RAZORPAY_MONTHLY_PLAN_ID
-              : process.env.RAZORPAY_YEARLY_PLAN_ID;
+          const planId = getRazorpayPlanId({
+            region: pricing.region,
+            billing,
+          });
+
+          if (!planId) {
+            return reply.code(500).send({
+              message: `Missing Razorpay plan ID for ${pricing.region} ${billing}`,
+            });
+          }
 
           if (!planId) {
             return reply
@@ -368,10 +395,19 @@ export async function billingRoutes(app: FastifyInstance) {
           user.cancelAtPeriodEnd = false;
           await user.save();
 
+          // return reply.send({
+          //   provider: "razorpay",
+          //   keyId: process.env.RAZORPAY_KEY_ID,
+          //   subscriptionId: subscription.id,
+          // });
           return reply.send({
             provider: "razorpay",
             keyId: process.env.RAZORPAY_KEY_ID,
             subscriptionId: subscription.id,
+            billing,
+            region: pricing.region,
+            currency: pricing.currency,
+            amount: pricing.prices[billing],
           });
         }
       } catch (error: any) {
@@ -574,12 +610,6 @@ export async function billingRoutes(app: FastifyInstance) {
             $or: [{ _id: notes.userId }, { clerkUserId: notes.clerkUserId }],
           });
         }
-
-        console.log("RAZORPAY WEBHOOK USER FOUND:", {
-          found: Boolean(user),
-          subscriptionId,
-          notes: subscriptionEntity?.notes,
-        });
 
         if (!user) {
           return reply.send({ received: true, userFound: false });

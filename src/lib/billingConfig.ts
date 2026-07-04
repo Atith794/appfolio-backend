@@ -1,10 +1,10 @@
 export type Billing = "MONTHLY" | "YEARLY";
 export type BillingCurrency = "INR" | "USD" | "GBP" | "EUR";
 export type BillingProvider = "razorpay" | "stripe";
-export type BillingRegion = "IN" | "UK" | "EU" | "ROW";
+export type BillingRegion = "IN" | "UK" | "GBP" | "US";
 
 export type RazorpayBillingConfig = {
-  region: "IN" | "UK" | "EU" | "ROW";
+  region: "IN" | "UK" | "GBP" | "US";
   currency: "INR" | "GBP" | "EUR" | "USD";
   provider: "razorpay";
   prices: Record<Billing, number>;
@@ -16,18 +16,18 @@ export type BillingConfig = RazorpayBillingConfig ;
 export const REGION_COUNTRY_MAP: Record<string, BillingRegion> = {
   IN: "IN",
   GB: "UK",
-  DE: "EU",
-  FR: "EU",
-  ES: "EU",
-  IT: "EU",
-  NL: "EU",
-  BE: "EU",
-  IE: "EU",
-  PT: "EU",
-  AT: "EU",
-  FI: "EU",
-  SE: "EU",
-  DK: "EU",
+  DE: "GBP",
+  FR: "GBP",
+  ES: "GBP",
+  IT: "GBP",
+  NL: "GBP",
+  BE: "GBP",
+  IE: "GBP",
+  PT: "GBP",
+  AT: "GBP",
+  FI: "GBP",
+  SE: "GBP",
+  DK: "GBP",
 };
 
 export const BILLING_CATALOG: Record<BillingRegion, BillingConfig> = {
@@ -83,7 +83,7 @@ export const BILLING_CATALOG: Record<BillingRegion, BillingConfig> = {
   //     YEARLY: process.env.STRIPE_PRICE_USD_YEARLY!,
   //   },
   // },
-   UK: {
+  UK: {
     region: "UK",
     currency: "GBP",
     provider: "razorpay",
@@ -96,8 +96,8 @@ export const BILLING_CATALOG: Record<BillingRegion, BillingConfig> = {
       YEARLY: process.env.RAZORPAY_PLAN_ID_YEARLY!,
     },
   },
-  EU: {
-    region: "EU",
+  GBP: {
+    region: "GBP",
     currency: "EUR",
     provider: "razorpay",
     prices: {
@@ -109,8 +109,8 @@ export const BILLING_CATALOG: Record<BillingRegion, BillingConfig> = {
       YEARLY: process.env.RAZORPAY_PLAN_ID_YEARLY!,
     },
   },
-  ROW: {
-    region: "ROW",
+  US: {
+    region: "US",
     currency: "USD",
     provider: "razorpay",
     prices: {
@@ -121,5 +121,5 @@ export const BILLING_CATALOG: Record<BillingRegion, BillingConfig> = {
       MONTHLY: process.env.RAZORPAY_PLAN_ID_MONTHLY!,
       YEARLY: process.env.RAZORPAY_PLAN_ID_YEARLY!,
     },
-  },
+  }
 };

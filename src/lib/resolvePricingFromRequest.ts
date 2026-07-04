@@ -22,10 +22,24 @@ function normalizeCountry(code?: string | string[] | null) {
   return String(code || "").trim().toUpperCase();
 }
 
-function getRegionFromCountry(country: string): BillingRegion {
-  return REGION_COUNTRY_MAP[country] || "ROW";
-}
+// function getRegionFromCountry(country: string): BillingRegion {
+//   return REGION_COUNTRY_MAP[country] || "ROW";
+// }
 
+export function getRegionFromCountry(country: string) {
+  const normalizedCountry = country.toUpperCase();
+
+  if (normalizedCountry === "IN") return "IN";
+  if (normalizedCountry === "US") return "US";
+
+  // Cloudflare/Vercel usually use "GB" for United Kingdom,
+  // not "UK".
+  if (normalizedCountry === "GB" || normalizedCountry === "UK") {
+    return "UK";
+  }
+
+  return "US";
+}
 
 export function resolvePricingFromRequest(req: FastifyRequest): ResolvedPricing {
   const headers = req.headers as Record<string, string | string[] | undefined>;
