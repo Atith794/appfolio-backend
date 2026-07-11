@@ -29,6 +29,32 @@ type RazorpayVerifyBody = {
   razorpay_signature?: string;
 };
 
+// Recurring payments type
+// type RazorpayWebhookBody = {
+//   event?: string;
+//   payload?: {
+//     subscription?: {
+//       entity?: {
+//         id?: string;
+//         status?: string;
+//         current_start?: number | null;
+//         current_end?: number | null;
+//         ended_at?: number | null;
+//         notes?: Record<string, string>;
+//       };
+//     };
+//     payment?: {
+//       entity?: {
+//         id?: string;
+//         status?: string;
+//         error_description?: string;
+//       };
+//     };
+//   };
+//   created_at?: number;
+//   account_id?: string;
+// };
+
 type RazorpayWebhookBody = {
   event?: string;
   payload?: {
@@ -45,7 +71,10 @@ type RazorpayWebhookBody = {
     payment?: {
       entity?: {
         id?: string;
+        order_id?: string;
         status?: string;
+        amount?: number;
+        currency?: string;
         error_description?: string;
       };
     };
@@ -56,6 +85,12 @@ type RazorpayWebhookBody = {
 
 type RawBodyRequest = FastifyRequest & {
   rawBody?: Buffer;
+};
+
+type RazorpayOrderVerifyBody = {
+  razorpay_payment_id?: string;
+  razorpay_order_id?: string;
+  razorpay_signature?: string;
 };
 
 function hmacSHA256Hex(payload: string | Buffer, secret: string) {
@@ -250,6 +285,51 @@ function getRazorpayPlanId(params: { region: string; billing: Billing }) {
   return planMap[region]?.[billing];
 }
 
+// One time payment helpers
+function getOneTimePlanPeriod(billing: Billing) {
+  const start = new Date();
+  const end = new Date(start);
+
+  if (billing === "MONTHLY") {
+    end.setMonth(end.getMonth() + 1);
+  } else if (billing === "YEARLY") {
+    end.setFullYear(end.getFullYear() + 1);
+  }
+
+  return { start, end };
+}
+
+function toRazorpayAmountInSubunits(amount: number, currency: string) {
+  const normalizedCurrency = String(currency).toUpperCase();
+
+  /**
+   * Your current catalog looks like it mainly uses INR / GBP / USD.
+   * These are 2-decimal currencies, so multiply by 100.
+   *
+   * Example:
+   * INR 999  => 99900
+   * USD 20  => 2000
+   * GBP 10  => 1000
+   */
+  const twoDecimalCurrencies = new Set(["INR", "USD", "GBP", "EUR"]);
+
+  if (!twoDecimalCurrencies.has(normalizedCurrency)) {
+    throw new Error(`Unsupported Razorpay currency: ${currency}`);
+  }
+
+  return Math.round(Number(amount) * 100);
+}
+
+function hasActivePaidAccess(user: any) {
+  const activeLike = ["ACTIVE", "TRIALING", "PAST_DUE"];
+
+  return Boolean(
+    user?.plan === "PRO" &&
+    activeLike.includes(String(user?.planStatus)) &&
+    isStillWithinPaidPeriod(user),
+  );
+}
+
 export async function billingRoutes(app: FastifyInstance) {
   if (!process.env.RAZORPAY_KEY_ID) {
     throw new Error("RAZORPAY_KEY_ID is missing");
@@ -327,7 +407,9 @@ export async function billingRoutes(app: FastifyInstance) {
 
       const user = await UserModel.findOne({ clerkUserId });
       if (!user) {
-        return reply.code(401).send({ message: "Unauthorized" });
+        return reply
+          .code(401)
+          .send({ message: "Unauthorized: User not found" });
       }
 
       const billing = req.body?.billing;
@@ -343,36 +425,139 @@ export async function billingRoutes(app: FastifyInstance) {
       }
 
       const pricing = resolvePricingForUser(req, user);
+      // Code block with recurring payments
+      // try {
+      //   if (pricing.provider === "razorpay") {
+      //     if (!("razorpayPlanIds" in pricing.config)) {
+      //       return reply.code(500).send({
+      //         message: "Invalid Razorpay billing configuration",
+      //       });
+      //     }
 
+      //     const planId = getRazorpayPlanId({
+      //       region: pricing.region,
+      //       billing,
+      //     });
+
+      //     if (!planId) {
+      //       return reply.code(500).send({
+      //         message: `Missing Razorpay plan ID for ${pricing.region} ${billing}`,
+      //       });
+      //     }
+
+      //     if (!planId) {
+      //       return reply
+      //         .code(500)
+      //         .send({ message: "Missing Razorpay plan ID" });
+      //     }
+
+      //     req.log.info(
+      //       {
+      //         provider: pricing.provider,
+      //         region: pricing.region,
+      //         billing,
+      //         currency: pricing.currency,
+      //         planId,
+      //         keyMode: process.env.RAZORPAY_KEY_ID?.startsWith("rzp_test_")
+      //           ? "TEST"
+      //           : "LIVE",
+      //       },
+      //       "Creating Razorpay subscription",
+      //     );
+
+      //     const subscription = await razorpay.subscriptions.create({
+      //       plan_id: planId,
+      //       total_count: getRazorpayTotalCount(billing),
+      //       quantity: 1,
+      //       notes: {
+      //         userId: String(user._id),
+      //         clerkUserId,
+      //         billing,
+      //         billingCountry: pricing.country,
+      //         billingCurrency: pricing.currency,
+      //         billingRegion: pricing.region,
+      //       },
+      //     });
+
+      //     applyBillingProfile({
+      //       user,
+      //       provider: "razorpay",
+      //       billing,
+      //       pricing,
+      //     });
+
+      //     user.razorpaySubscriptionId = subscription.id;
+      //     user.planStatus = "INACTIVE";
+      //     user.cancelAtPeriodEnd = false;
+      //     await user.save();
+
+      //     // return reply.send({
+      //     //   provider: "razorpay",
+      //     //   keyId: process.env.RAZORPAY_KEY_ID,
+      //     //   subscriptionId: subscription.id,
+      //     // });
+      //     return reply.send({
+      //       provider: "razorpay",
+      //       keyId: process.env.RAZORPAY_KEY_ID,
+      //       subscriptionId: subscription.id,
+      //       billing,
+      //       region: pricing.region,
+      //       currency: pricing.currency,
+      //       amount: pricing.prices[billing],
+      //     });
+      //   }
+      // }
+      // catch (error: any) {
+      //   req.log.error(
+      //     {
+      //       razorpayStatusCode: error?.statusCode,
+      //       razorpayCode: error?.error?.code,
+      //       razorpayDescription: error?.error?.description,
+      //       razorpayField: error?.error?.field,
+      //       razorpayStep: "subscriptions.create",
+      //     },
+      //     "Billing checkout failed",
+      //   );
+      //   req.log.error({ err:error }, "Billing checkout failed");
+      //   return reply.code(500).send({ message: "Unable to create checkout" });
+      // }
       try {
         if (pricing.provider === "razorpay") {
-          if (!("razorpayPlanIds" in pricing.config)) {
-            return reply.code(500).send({
-              message: "Invalid Razorpay billing configuration",
+          if (hasActivePaidAccess(user)) {
+            return reply.code(409).send({
+              message: "You already have an active paid plan",
             });
           }
 
-          const planId = getRazorpayPlanId({
-            region: pricing.region,
-            billing,
-          });
+          const amount = pricing.prices[billing];
+          const amountInSubunits = toRazorpayAmountInSubunits(
+            amount,
+            pricing.currency,
+          );
 
-          if (!planId) {
-            return reply.code(500).send({
-              message: `Missing Razorpay plan ID for ${pricing.region} ${billing}`,
-            });
-          }
+          const receipt = `pro_${String(user._id).slice(-10)}_${Date.now()
+            .toString()
+            .slice(-8)}`;
 
-          if (!planId) {
-            return reply
-              .code(500)
-              .send({ message: "Missing Razorpay plan ID" });
-          }
+          req.log.info(
+            {
+              provider: pricing.provider,
+              region: pricing.region,
+              billing,
+              currency: pricing.currency,
+              amount,
+              amountInSubunits,
+              keyMode: process.env.RAZORPAY_KEY_ID?.startsWith("rzp_test_")
+                ? "TEST"
+                : "LIVE",
+            },
+            "Creating Razorpay one-time order",
+          );
 
-          const subscription = await razorpay.subscriptions.create({
-            plan_id: planId,
-            total_count: getRazorpayTotalCount(billing),
-            quantity: 1,
+          const order = await razorpay.orders.create({
+            amount: amountInSubunits,
+            currency: pricing.currency,
+            receipt,
             notes: {
               userId: String(user._id),
               clerkUserId,
@@ -380,6 +565,7 @@ export async function billingRoutes(app: FastifyInstance) {
               billingCountry: pricing.country,
               billingCurrency: pricing.currency,
               billingRegion: pricing.region,
+              paymentType: "one_time",
             },
           });
 
@@ -390,28 +576,60 @@ export async function billingRoutes(app: FastifyInstance) {
             pricing,
           });
 
-          user.razorpaySubscriptionId = subscription.id;
-          user.planStatus = "INACTIVE";
+          /**
+           * Add these fields in your User model if they don't already exist:
+           * razorpayOrderId
+           * razorpayPaymentId
+           * billingType
+           */
+          user.razorpayOrderId = order.id;
+          user.billingType = "one_time";
+          user.planStatus = "PENDING";
           user.cancelAtPeriodEnd = false;
+
+          /**
+           * Since this is no longer a subscription checkout,
+           * clear old pending subscription id if needed.
+           */
+          user.razorpaySubscriptionId = undefined;
+
           await user.save();
 
-          // return reply.send({
-          //   provider: "razorpay",
-          //   keyId: process.env.RAZORPAY_KEY_ID,
-          //   subscriptionId: subscription.id,
-          // });
           return reply.send({
             provider: "razorpay",
+            checkoutType: "order",
             keyId: process.env.RAZORPAY_KEY_ID,
-            subscriptionId: subscription.id,
+            orderId: order.id,
             billing,
             region: pricing.region,
             currency: pricing.currency,
-            amount: pricing.prices[billing],
+
+            /**
+             * amount is sent in subunits for Razorpay Checkout.
+             * displayAmount is only for your UI.
+             */
+            amount: order.amount,
+            displayAmount: pricing.prices[billing],
           });
         }
+
+        return reply.code(400).send({
+          message: "Unsupported payment provider",
+        });
       } catch (error: any) {
-        req.log.error({ error }, "Billing checkout failed");
+        req.log.error(
+          {
+            razorpayStatusCode: error?.statusCode,
+            razorpayCode: error?.error?.code,
+            razorpayDescription: error?.error?.description,
+            razorpayField: error?.error?.field,
+            razorpayStep: "orders.create",
+          },
+          "Billing checkout failed",
+        );
+
+        req.log.error({ err: error }, "Billing checkout failed");
+
         return reply.code(500).send({ message: "Unable to create checkout" });
       }
     },
@@ -551,6 +769,126 @@ export async function billingRoutes(app: FastifyInstance) {
     },
   );
 
+  app.post<{ Body: RazorpayOrderVerifyBody }>(
+    "/razorpay/verify-order",
+    {
+      preHandler: app.requireAuth,
+      bodyLimit: 10 * 1024,
+      config: {
+        rateLimit: {
+          max: 10,
+          timeWindow: "1 minute",
+        },
+      },
+      schema: {
+        body: {
+          type: "object",
+          additionalProperties: false,
+          required: [
+            "razorpay_payment_id",
+            "razorpay_order_id",
+            "razorpay_signature",
+          ],
+          properties: {
+            razorpay_payment_id: {
+              type: "string",
+              minLength: 1,
+              maxLength: 100,
+            },
+            razorpay_order_id: {
+              type: "string",
+              minLength: 1,
+              maxLength: 100,
+            },
+            razorpay_signature: {
+              type: "string",
+              pattern: "^[a-fA-F0-9]{64}$",
+            },
+          },
+        },
+      },
+    },
+    async (req, reply) => {
+      const clerkUserId = getClerkUserId(req);
+
+      if (!clerkUserId) {
+        return reply.code(401).send({ message: "Unauthorized" });
+      }
+
+      const user = await UserModel.findOne({ clerkUserId });
+
+      if (!user) {
+        return reply.code(401).send({ message: "Unauthorized" });
+      }
+
+      const { razorpay_payment_id, razorpay_order_id, razorpay_signature } =
+        req.body || {};
+
+      if (!razorpay_payment_id || !razorpay_order_id || !razorpay_signature) {
+        return reply.code(400).send({ message: "Missing payment fields" });
+      }
+
+      if (!user.razorpayOrderId) {
+        return reply.code(400).send({ message: "No Razorpay order found" });
+      }
+
+      if (razorpay_order_id !== user.razorpayOrderId) {
+        return reply.code(400).send({ message: "Order ID mismatch" });
+      }
+
+      const expected = hmacSHA256Hex(
+        `${razorpay_order_id}|${razorpay_payment_id}`,
+        process.env.RAZORPAY_KEY_SECRET!,
+      );
+
+      if (!safeEqualHex(expected, razorpay_signature)) {
+        return reply.code(400).send({ message: "Invalid Razorpay signature" });
+      }
+
+      const payment = await razorpay.payments.fetch(razorpay_payment_id);
+
+      if ((payment as any)?.order_id !== razorpay_order_id) {
+        return reply.code(400).send({ message: "Payment order mismatch" });
+      }
+
+      if ((payment as any)?.status !== "captured") {
+        return reply.code(400).send({
+          message: `Payment is not captured. Current status: ${(payment as any)?.status}`,
+        });
+      }
+
+      const billing = isValidBilling(user.billingInterval)
+        ? user.billingInterval
+        : "MONTHLY";
+
+      const { start, end } = getOneTimePlanPeriod(billing);
+
+      user.provider = "razorpay";
+      user.billingType = "one_time";
+      user.razorpayOrderId = razorpay_order_id;
+      user.razorpayPaymentId = razorpay_payment_id;
+
+      user.plan = "PRO";
+      user.planStatus = "ACTIVE";
+      user.planPurchasedAt = user.planPurchasedAt || start;
+      user.lastPaymentAt = new Date();
+      user.currentPeriodStart = start;
+      user.planValidUntil = end;
+      user.cancelAtPeriodEnd = false;
+
+      await user.save();
+
+      return reply.send({
+        success: true,
+        provider: "razorpay",
+        checkoutType: "order",
+        plan: user.plan,
+        planStatus: user.planStatus,
+        planValidUntil: user.planValidUntil,
+      });
+    },
+  );
+
   app.post(
     "/razorpay/webhook",
     {
@@ -594,6 +932,59 @@ export async function billingRoutes(app: FastifyInstance) {
         const subscriptionEntity = event?.payload?.subscription?.entity;
         const paymentEntity = event?.payload?.payment?.entity;
         const subscriptionId = subscriptionEntity?.id;
+
+        if (
+          !subscriptionId &&
+          paymentEntity?.order_id &&
+          eventName === "payment.captured"
+        ) {
+          let user = await UserModel.findOne({
+            razorpayOrderId: paymentEntity.order_id,
+          });
+
+          if (!user) {
+            return reply.send({
+              received: true,
+              userFound: false,
+              reason: "No user found for Razorpay order",
+            });
+          }
+
+          const eventId = String(req.headers["x-razorpay-event-id"] || "");
+
+          if (eventId && user.lastWebhookEventId === eventId) {
+            return reply.send({ received: true, deduped: true });
+          }
+
+          if (eventId) {
+            user.lastWebhookEventId = eventId;
+          }
+
+          const billing = isValidBilling(user.billingInterval)
+            ? user.billingInterval
+            : "MONTHLY";
+
+          const { start, end } = getOneTimePlanPeriod(billing);
+
+          user.provider = "razorpay";
+          user.billingType = "one_time";
+          user.razorpayPaymentId = paymentEntity.id;
+
+          user.plan = "PRO";
+          user.planStatus = "ACTIVE";
+          user.planPurchasedAt = user.planPurchasedAt || start;
+          user.lastPaymentAt = new Date();
+          user.currentPeriodStart = user.currentPeriodStart || start;
+          user.planValidUntil = user.planValidUntil || end;
+          user.cancelAtPeriodEnd = false;
+
+          await user.save();
+
+          return reply.send({
+            received: true,
+            checkoutType: "order",
+          });
+        }
 
         if (!subscriptionId) {
           return reply.send({ received: true, reason: "No subscription id" });
