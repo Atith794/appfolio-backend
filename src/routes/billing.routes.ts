@@ -584,7 +584,9 @@ export async function billingRoutes(app: FastifyInstance) {
            */
           user.razorpayOrderId = order.id;
           user.billingType = "one_time";
-          user.planStatus = "PENDING";
+          // user.planStatus = "PENDING";
+          user.plan = "FREE";
+          user.planStatus = "INACTIVE";
           user.cancelAtPeriodEnd = false;
 
           /**
