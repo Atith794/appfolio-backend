@@ -417,12 +417,6 @@ export async function billingRoutes(app: FastifyInstance) {
         return reply.code(400).send({ message: "Invalid billing" });
       }
 
-      if (hasOpenSubscriptionState(user)) {
-        return reply.code(409).send({
-          message:
-            "Subscription already exists or is still active for this user",
-        });
-      }
 
       const pricing = resolvePricingForUser(req, user);
       // Code block with recurring payments
@@ -582,18 +576,24 @@ export async function billingRoutes(app: FastifyInstance) {
            * razorpayPaymentId
            * billingType
            */
+          // user.razorpayOrderId = order.id;
+          // user.billingType = "one_time";
+          // user.plan = "FREE";
+          // user.planStatus = "INACTIVE";
+          // user.cancelAtPeriodEnd = false;
+
+          // user.razorpaySubscriptionId = undefined;
+
           user.razorpayOrderId = order.id;
+          user.razorpayPaymentId = null;
           user.billingType = "one_time";
-          // user.planStatus = "PENDING";
+
           user.plan = "FREE";
           user.planStatus = "INACTIVE";
           user.cancelAtPeriodEnd = false;
 
-          /**
-           * Since this is no longer a subscription checkout,
-           * clear old pending subscription id if needed.
-           */
-          user.razorpaySubscriptionId = undefined;
+          // Use null because the schema default is null
+          user.razorpaySubscriptionId = null;
 
           await user.save();
 
@@ -817,14 +817,14 @@ export async function billingRoutes(app: FastifyInstance) {
         return reply.code(401).send({ message: "Unauthorized" });
       }
 
-      const user = await UserModel.findOne({ clerkUserId });
+      const { razorpay_payment_id, razorpay_order_id, razorpay_signature } =
+        req.body || {};
+
+      const user = await UserModel.findOne({ clerkUserId, razorpayOrderId: razorpay_order_id });
 
       if (!user) {
         return reply.code(401).send({ message: "Unauthorized" });
       }
-
-      const { razorpay_payment_id, razorpay_order_id, razorpay_signature } =
-        req.body || {};
 
       if (!razorpay_payment_id || !razorpay_order_id || !razorpay_signature) {
         return reply.code(400).send({ message: "Missing payment fields" });
